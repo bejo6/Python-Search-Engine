@@ -11,7 +11,6 @@ class Yahoo:
         self.filtering = True
 
     def search(self, keyword: str) -> list:
-        # https://search.yahoo.com/search;_ylt=Awr9CKwV6hZhSEIAcfdDDWVH?p=TRANSMISSION&fr=sfp&fr2=p%3As%2Cv%3Asfp%2Cm%3Asb-top&iscqry=
         self.query.update({'p': keyword})
         search_url = self.build_query()
         if search_url:
@@ -45,21 +44,19 @@ class Yahoo:
                     duplicate_page += 1
 
             if duplicate_page >= 3:
-                # print('duplicate_page:', duplicate_page)
-                # print('last count link:', len(links))
                 break
 
-            next = self.get_next_page(html)
-            if next:
+            next_page = self.get_next_page(html)
+            if next_page:
                 referrer = url
-                url = next
+                url = next_page
             else:
                 break
 
         result = list(dict.fromkeys(result))
         return result
 
-    def build_query(self, html: str=None) -> str:
+    def build_query(self, html: str = None) -> str:
         patern_form = r'(?:<form[^>]+role[\s=]+((?:")search(?:")|(?:\')search(?:\'))[^>]+>)[\s\S]+<\/form>'
         patern_action = r'action[\s=]+((?:")(.*?)(?:")|(?:\')(.*?)(?:\'))'
         patern_input = r'(?:<input[^>]+/?>)'
@@ -78,11 +75,11 @@ class Yahoo:
                 if action_val and len(action_val.groups()) >= 3:
                     search_url = action_val.group(3) or action_val.group(2)
                 inputs = re.findall(patern_input, form_str, re.I)
-                for input in inputs:
+                for _input in inputs:
                     name = None
                     value = None
-                    get_name = re.search(patern_name, input, re.I)
-                    get_value = re.search(patern_value, input, re.I)
+                    get_name = re.search(patern_name, _input, re.I)
+                    get_value = re.search(patern_value, _input, re.I)
                     if get_name and len(get_name.groups()) >= 3:
                         name = get_name.group(3) or get_name.group(2)
                     if get_value and len(get_value.groups()) >= 3:
@@ -96,7 +93,8 @@ class Yahoo:
 
         return search_url
 
-    def get_links(self, html: str=None) -> list:
+    @staticmethod
+    def get_links(html: str = None) -> list:
         result = []
         if not html:
             return result
@@ -108,7 +106,7 @@ class Yahoo:
         matches = re.findall(patern_links, html, re.M | re.I)
         for match in matches:
             href = re.search(patern_href, match, re.I)
-            
+
             if href and len(href.groups()) >= 3:
                 temp_link = clean_url(href.group(3) or href.group(2))
                 web_url = re.search(patern_url, temp_link, re.I)
@@ -125,10 +123,10 @@ class Yahoo:
 
         return result
 
-    def get_next_page(self, html: str=None) -> str:
-        next = ''
+    def get_next_page(self, html: str = None) -> str:
+        next_page = ''
         if not html:
-            return next
+            return next_page
 
         patern_next = r'(?:<a[^>]+class[\s=]+((?:")next(?:")|(?:\')next(?:\'))[^>]+>)'
         patern_href = r'href[\s=]+((?:")(.*?)(?:")|(?:\')(.*?)(?:\'))'
@@ -138,6 +136,6 @@ class Yahoo:
             href = re.search(patern_href, matches.group(0), re.I)
             if href and len(href.groups()) >= 3:
                 path = href.group(3) or href.group(2)
-                next = clean_url(urljoin(self.base_url, path))
+                next_page = clean_url(urljoin(self.base_url, path))
 
-        return next
+        return next_page

@@ -11,7 +11,6 @@ class Bing:
         self.filtering = True
 
     def search(self, keyword: str) -> list:
-        # https://www.bing.com/search?q=python&form=QBLH&sp=-1&pq=python&sc=8-6&qs=n&sk=&cvid=8596F35B25A543A4974C533C610F27EF
         self.query.update({'q': keyword})
         self.build_query()
 
@@ -43,14 +42,12 @@ class Bing:
                     duplicate_page += 1
 
             if duplicate_page >= 3:
-                # print('duplicate_page:', duplicate_page)
-                # print('last count link:', len(links))
                 break
 
-            next = self.get_next_page(html)
-            if next:
+            next_page = self.get_next_page(html)
+            if next_page:
                 referrer = url
-                url = next
+                url = next_page
             else:
                 break
 
@@ -70,7 +67,7 @@ class Bing:
             if cvid:
                 self.query.update({'cvid': cvid})
 
-    def get_query_form_value(self, html: str=None) -> str:
+    def get_query_form_value(self, html: str = None) -> str:
         form_value = ''
         if not html:
             html = fetch_url(self.base_url, delete_cookie=True)
@@ -80,16 +77,16 @@ class Bing:
         patern_input_value = r'value[\s=]+(?:\'|")(.*?)(?:\'|")'
 
         inputs = re.findall(patern_input, html, re.I)
-        for input in inputs:
-            if re.search(patern_input_form, input, re.I):
-                get_value = re.search(patern_input_value, input, re.I)
+        for _input in inputs:
+            if re.search(patern_input_form, _input, re.I):
+                get_value = re.search(patern_input_value, _input, re.I)
                 if get_value:
                     form_value = get_value.group(1)
                     break
 
         return form_value
 
-    def get_query_cvid(self, html: str=None) -> str:
+    def get_query_cvid(self, html: str = None) -> str:
         cvid = ''
         if not html:
             html = fetch_url(self.base_url, delete_cookie=True)
@@ -105,7 +102,8 @@ class Bing:
 
         return cvid
 
-    def get_links(self, html: str=None) -> list:
+    @staticmethod
+    def get_links(html: str = None) -> list:
         result = []
         if not html:
             return result
@@ -126,10 +124,10 @@ class Bing:
 
         return result
 
-    def get_next_page(self, html: str=None) -> str:
-        next = ''
+    def get_next_page(self, html: str = None) -> str:
+        next_page = ''
         if not html:
-            return next
+            return next_page
 
         patern_sbpagn = r'(?:<a[^>]+(sb_pagN(_bp)?)+[^>]+>)'
         patern_href = r'href[\s=]+((?:")(.*?)(?:")|(?:\')(.*?)(?:\'))'
@@ -140,6 +138,6 @@ class Bing:
 
             if href and len(href.groups()) >= 3:
                 path = href.group(3) or href.group(2)
-                next = clean_url(urljoin(self.base_url, path))
+                next_page = clean_url(urljoin(self.base_url, path))
 
-        return next
+        return next_page
