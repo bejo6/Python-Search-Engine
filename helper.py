@@ -3,7 +3,7 @@ import re
 import hashlib
 import http.cookiejar
 from html import unescape
-from urllib.parse import urlparse, urldefrag, urlsplit, unquote_plus
+from urllib.parse import urlparse, urldefrag, urlsplit
 from urllib.request import Request, HTTPCookieProcessor, build_opener, urlopen
 from blacklist import DOMAIN_BLACKLIST
 
@@ -23,8 +23,7 @@ def cookie_file(url, ext='_cookie'):
     return _cookieFile
 
 
-def fetch_url(url, delete_cookie=False, headers: dict=None):
-    # user_agent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:91.0) Gecko/20100101 Firefox/91.0'
+def fetch_url(url, delete_cookie=False, headers: dict = None):
     _result = None
     _userAgent = 'Mozilla/5.0 (Windows NT 6.1; Win64; x64)'
     _request = Request(url)
@@ -66,8 +65,21 @@ def clean_url(url):
     lower = surl.netloc.lower()
     url = url.replace(surl.netloc, lower)
     url = unescape(url)
-    # return unquote_plus(url)
     return url
+
+
+def valid_url(url):
+    if not re.match(r'^https?://', url, re.I):
+        url = re.sub(r'^:?//', '', url)
+        url = f'http://{url}'
+
+    parse_url = urlparse(url, allow_fragments=False)
+    patern_domain = r'[a-z0-9-]{1,63}\.[a-z]{2,6}(:\d+)?$'
+    domain_name = re.search(patern_domain, parse_url.netloc, re.I)
+    if domain_name:
+        return clean_url(url)
+
+    return ''
 
 
 def is_blacklisted(url: str):
