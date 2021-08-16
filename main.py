@@ -1,23 +1,21 @@
 import os
 import sys
-import json
 import getopt
 import threading
 from bing import Bing
 from yahoo import Yahoo
+from google import Google
 
 
 def usage():
     print('usage')
 
 
-def save_links(links: list, filename: str='results.txt'):
+def save_links(links: list, filename: str = 'results.txt'):
     current_links = []
     if os.path.isfile(filename):
         with open(filename, 'r') as f:
             current_links = f.read().splitlines()
-
-    # current_links = list(dict.fromkeys(current_links))
 
     for link in links:
         if link not in current_links:
@@ -26,7 +24,7 @@ def save_links(links: list, filename: str='results.txt'):
             current_links.append(link)
 
 
-def engine_tasks(engine, keyword, output: str=None):
+def engine_tasks(engine, keyword, output: str = None):
     links = engine.search(keyword)
     if output:
         save_links(links, output)
@@ -34,13 +32,14 @@ def engine_tasks(engine, keyword, output: str=None):
         save_links(links)
 
 
-def engine_start(keyword: str, output: str=None):
+def engine_start(keyword: str, output: str = None):
     bing = Bing()
     yahoo = Yahoo()
+    google = Google()
 
-    threads =[]
+    threads = []
 
-    for engine in [bing, yahoo]:
+    for engine in [bing, yahoo, google]:
         t = threading.Thread(target=engine_tasks, args=(engine, keyword, output))
         threads.append(t)
 
