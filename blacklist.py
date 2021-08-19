@@ -8,4 +8,5 @@ DOMAIN_BLACKLIST = [
     'google.com',
     'quora.com',
     'amazon.com',
+    'ask.com',
 ]
