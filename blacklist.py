@@ -6,6 +6,7 @@ DOMAIN_BLACKLIST = [
     'wikipedia.org',
     'youtube.com',
     'google.com',
+    'googleadservices.com',
     'quora.com',
     'amazon.com',
     'ask.com',
