@@ -7,6 +7,7 @@ from urllib.parse import urlparse, urldefrag, urlsplit
 from urllib.request import Request, HTTPCookieProcessor, build_opener, urlopen
 from urllib.error import HTTPError, URLError
 from blacklist import DOMAIN_BLACKLIST
+from socket import timeout
 
 
 def list_charset() -> list:
@@ -96,6 +97,10 @@ def fetch_url(url, delete_cookie=False, headers: dict = None):
         except HTTPError as err:
             print(err)
         except URLError as err:
+            print(err)
+        except timeout as err:
+            print(err)
+        except Exception as err:
             print(err)
 
     if _response:
