@@ -6,6 +6,7 @@ from bing import Bing
 from yahoo import Yahoo
 from google import Google
 from ask import Ask
+from aol import Aol
 
 
 def usage():
@@ -34,14 +35,17 @@ def engine_tasks(engine, keyword: str, output: str = None):
 
 
 def engine_start(keyword: str, output: str = None):
-    bing = Bing()
-    yahoo = Yahoo()
-    google = Google()
-    ask = Ask()
+    engines = [
+        Bing(),
+        Yahoo(),
+        Google(),
+        Ask(),
+        Aol(),
+    ]
 
     threads = []
 
-    for engine in [bing, yahoo, google, ask]:
+    for engine in engines:
         t = threading.Thread(target=engine_tasks, args=(engine, keyword, output))
         threads.append(t)
 
