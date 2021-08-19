@@ -84,7 +84,7 @@ class Google:
             }
         }
         client_opera = {
-            'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.164 Safari/537.36 OPR/77.0.4054.277',
+            'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/92.0.4515.131 Safari/537.36 OPR/78.0.4093.147',
             'params': {
                 'client': 'opera',
                 'q': keyword,
@@ -94,7 +94,7 @@ class Google:
             }
         }
         client_firefox = {
-            'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:89.0) Gecko/20100101 Firefox/89.0',
+            'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:91.0) Gecko/20100101 Firefox/91.0',
             'params': {
                 'client': 'firefox-b-d',
                 'q': keyword,
@@ -107,7 +107,6 @@ class Google:
             client_firefox,
         ]
         client = random.choice(clients)
-        # client = client_firefox
         self.query = client.get('params')
         self.user_agent = client.get('user_agent')
 
