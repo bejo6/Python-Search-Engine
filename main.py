@@ -5,6 +5,7 @@ import threading
 from bing import Bing
 from yahoo import Yahoo
 from google import Google
+from ask import Ask
 
 
 def usage():
@@ -24,7 +25,7 @@ def save_links(links: list, filename: str = 'results.txt'):
             current_links.append(link)
 
 
-def engine_tasks(engine, keyword, output: str = None):
+def engine_tasks(engine, keyword: str, output: str = None):
     links = engine.search(keyword)
     if output:
         save_links(links, output)
@@ -36,10 +37,11 @@ def engine_start(keyword: str, output: str = None):
     bing = Bing()
     yahoo = Yahoo()
     google = Google()
+    ask = Ask()
 
     threads = []
 
-    for engine in [bing, yahoo, google]:
+    for engine in [bing, yahoo, google, ask]:
         t = threading.Thread(target=engine_tasks, args=(engine, keyword, output))
         threads.append(t)
 
