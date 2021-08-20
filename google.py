@@ -1,7 +1,11 @@
-import random
 import re
+import random
 from urllib.parse import urljoin, urlencode
-from helper import fetch_url, clean_url, is_blacklisted, valid_url
+from helper import fetch_url, clean_url, is_blacklisted, valid_url, setup_logger
+from config import LOG_LEVEL
+
+
+logger = setup_logger(name='Yandex', level=LOG_LEVEL)
 
 
 class Google:
@@ -23,7 +27,9 @@ class Google:
 
         duplicate_page = 0
         headers = {'User-Agent': self.user_agent}
+        page = 1
         while True:
+            logger.info(f'Page: {page}')
             html = fetch_url(url, headers=headers)
             links = self.get_links(html)
 
@@ -36,7 +42,7 @@ class Google:
 
                     if link not in result:
                         duplicate = False
-                        print('[Google]', link)
+                        logger.info(link)
                         result.append(link)
                 if duplicate:
                     duplicate_page += 1
@@ -50,6 +56,7 @@ class Google:
                 url = next_page
             else:
                 break
+            page += 1
 
         result = list(dict.fromkeys(result))
         return result

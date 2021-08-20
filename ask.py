@@ -1,6 +1,10 @@
 import re
 from urllib.parse import urljoin, urlencode
-from helper import fetch_url, clean_url, is_blacklisted, valid_url
+from helper import fetch_url, clean_url, is_blacklisted, valid_url, setup_logger
+from config import LOG_LEVEL
+
+
+logger = setup_logger(name='Ask', level=LOG_LEVEL)
 
 
 class Ask:
@@ -25,6 +29,7 @@ class Ask:
         headers = {'Referer': self.base_url}
         page = 1
         while True:
+            logger.info(f'Page: {page}')
             html = fetch_url(url, headers=headers)
             links = self.get_links(html)
 
@@ -41,7 +46,7 @@ class Ask:
 
                     if link not in result:
                         duplicate = False
-                        print('[Ask]', link)
+                        logger.info(link)
                         result.append(link)
                 if duplicate:
                     duplicate_page += 1

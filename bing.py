@@ -1,6 +1,10 @@
 import re
 from urllib.parse import urljoin, urlencode
-from helper import fetch_url, clean_url, is_blacklisted
+from helper import fetch_url, clean_url, is_blacklisted, setup_logger
+from config import LOG_LEVEL
+
+
+logger = setup_logger(name='Bing', level=LOG_LEVEL)
 
 
 class Bing:
@@ -23,8 +27,9 @@ class Bing:
         result = []
         duplicate_page = 0
         referrer = self.base_url
-
+        page = 1
         while True:
+            logger.info(f'Page: {page}')
             html = fetch_url(url, headers={'Referer': referrer})
             links = self.get_links(html)
 
@@ -36,7 +41,7 @@ class Bing:
                             continue
                     if link not in result:
                         duplicate = False
-                        print('[Bing]', link)
+                        logger.info(link)
                         result.append(link)
                 if duplicate:
                     duplicate_page += 1
@@ -50,6 +55,7 @@ class Bing:
                 url = next_page
             else:
                 break
+            page += 1
 
         result = list(dict.fromkeys(result))
         return result

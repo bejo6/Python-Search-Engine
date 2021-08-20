@@ -1,24 +1,30 @@
 import os
 import re
 import hashlib
+import logging
 import http.cookiejar
 from html import unescape
 from urllib.parse import urlparse, urldefrag, urlsplit
-from urllib.request import Request, HTTPCookieProcessor, build_opener, urlopen
+from urllib.request import Request, HTTPCookieProcessor, build_opener, urlopen, OpenerDirector
 from urllib.error import HTTPError, URLError
 from blacklist import DOMAIN_BLACKLIST
 from socket import timeout
+from ssl import SSLError
 
 
 def list_charset() -> list:
-    _list_charset = ['utf_8', 'iso8859_1', 'ascii', 'big5', 'big5hkscs', 'cp037', 'cp424', 'cp437', 'cp500', 'cp720', 'cp737', 'cp775', 'cp850', 'cp852', 'cp855', 'cp856',
-                     'cp857', 'cp858', 'cp860', 'cp861', 'cp862', 'cp863', 'cp864', 'cp865', 'cp866', 'cp869', 'cp874', 'cp875', 'cp932', 'cp949', 'cp950',
-                     'cp1006', 'cp1026', 'cp1140', 'cp1250', 'cp1251', 'cp1252', 'cp1253', 'cp1254', 'cp1255', 'cp1256', 'cp1257', 'cp1258', 'euc_jp',
-                     'euc_jis_2004', 'euc_jisx0213', 'euc_kr', 'gb2312', 'gbk', 'gb18030', 'hz', 'iso2022_jp', 'iso2022_jp_1', 'iso2022_jp_2',
-                     'iso2022_jp_2004', 'iso2022_jp_3', 'iso2022_jp_ext', 'iso2022_kr', 'latin_1', 'iso8859_2', 'iso8859_3', 'iso8859_4', 'iso8859_5',
-                     'iso8859_6', 'iso8859_7', 'iso8859_8', 'iso8859_9', 'iso8859_10', 'iso8859_11', 'iso8859_13', 'iso8859_14', 'iso8859_15', 'iso8859_16',
-                     'johab', 'koi8_r', 'koi8_u', 'mac_cyrillic', 'mac_greek', 'mac_iceland', 'mac_latin2', 'mac_roman', 'mac_turkish', 'ptcp154', 'shift_jis',
-                     'shift_jis_2004', 'shift_jisx0213', 'utf_32', 'utf_32_be', 'utf_32_le', 'utf_16', 'utf_16_be', 'utf_16_le', 'utf_7', 'utf_8_sig']
+    _list_charset = [
+        'ascii', 'utf_8', 'iso8859_1', 'latin_1', 'big5', 'utf_8_sig', 'utf_16', 'utf_16_be', 'utf_16_le', 'utf_32',
+        'utf_32_be', 'utf_32_le', 'utf_7', 'iso8859_2', 'iso8859_3', 'iso8859_4', 'iso8859_5', 'iso8859_6', 'iso8859_7',
+        'iso8859_8', 'iso8859_9', 'iso8859_10', 'iso8859_11', 'iso8859_13', 'iso8859_14', 'iso8859_15', 'iso8859_16',
+        'iso2022_jp', 'iso2022_jp_1', 'iso2022_jp_2', 'iso2022_jp_2004', 'iso2022_jp_3', 'iso2022_jp_ext', 'iso2022_kr',
+        'big5hkscs', 'cp037', 'cp424', 'cp437', 'cp500', 'cp720', 'cp737', 'cp775', 'cp850', 'cp852', 'cp855', 'cp856',
+        'cp857', 'cp858', 'cp860', 'cp861', 'cp862', 'cp863', 'cp864', 'cp865', 'cp866', 'cp869', 'cp874', 'cp875',
+        'cp932', 'cp949', 'cp950', 'cp1006', 'cp1026', 'cp1140', 'cp1250', 'cp1251', 'cp1252', 'cp1253', 'cp1254',
+        'cp1255', 'cp1256', 'cp1257', 'cp1258', 'euc_jis_2004', 'euc_jisx0213', 'euc_jp', 'euc_kr', 'gb18030', 'gb2312',
+        'gbk', 'hz', 'johab', 'koi8_r', 'koi8_u', 'mac_cyrillic', 'mac_greek', 'mac_iceland', 'mac_latin2', 'mac_roman',
+        'mac_turkish', 'ptcp154', 'shift_jis', 'shift_jis_2004', 'shift_jisx0213'
+    ]
 
     return _list_charset
 
@@ -84,27 +90,41 @@ def fetch_url(url, delete_cookie=False, headers: dict = None):
 
         handler = HTTPCookieProcessor(cookie)
         opener = build_opener(handler)
-        try:
-            _response = opener.open(_request, timeout=10)
-            cookie.save(_cookieFile, ignore_discard=True, ignore_expires=True)
-        except HTTPError as err:
-            print(err)
-        except URLError as err:
-            print(err)
+        _response = fetch_open(_request, opener)
     else:
+        _response = fetch_open(_request)
+
+    if _response:
         try:
-            _response = urlopen(_request, timeout=10)
-        except HTTPError as err:
-            print(err)
-        except URLError as err:
-            print(err)
-        except timeout as err:
-            print(err)
+            _result, _ = decode_bytes(_response.read())
         except Exception as err:
             print(err)
 
-    if _response:
-        _result, _ = decode_bytes(_response.read())
+    return _result
+
+
+def fetch_open(req: Request, method=None, debug=True):
+    _result = None
+    try:
+        if isinstance(method, OpenerDirector):
+            _result = method.open(req, timeout=10)
+        else:
+            _result = urlopen(req, timeout=10)
+    except HTTPError as err:
+        if debug:
+            print(err)
+    except URLError as err:
+        if debug:
+            print(err)
+    except timeout as err:
+        if debug:
+            print(err)
+    except SSLError as err:
+        if debug:
+            print(err)
+    except Exception as err:
+        if debug:
+            print(err)
 
     return _result
 
@@ -144,3 +164,30 @@ def is_blacklisted(url: str):
         except IndexError:
             pass
     return False
+
+
+def setup_logger(name: str = None, level: str = 'info'):
+    if not name:
+        name = 'Search Engine'
+
+    log_format = '%(asctime)s %(levelname)s [%(name)s] %(message)s'
+    # date_format = '%d-%b-%y %H:%M:%S'
+    date_format = '%H:%M:%S'
+    logging.basicConfig(
+        format=log_format,
+        datefmt=date_format,
+    )
+    logger = logging.getLogger(name=name)
+
+    if re.match(r'debug', level, re.I):
+        logger.setLevel(logging.DEBUG)
+    elif re.match(r'warn(ing)?', level, re.I):
+        logger.setLevel(logging.WARNING)
+    elif re.match(r'crit(ical)?', level, re.I):
+        logger.setLevel(logging.CRITICAL)
+    elif re.match(r'error', level, re.I):
+        logger.setLevel(logging.ERROR)
+    else:
+        logger.setLevel(logging.INFO)
+
+    return logger

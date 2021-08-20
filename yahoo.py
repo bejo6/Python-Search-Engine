@@ -1,6 +1,10 @@
 import re
 from urllib.parse import urljoin, urlencode, unquote
-from helper import fetch_url, clean_url, is_blacklisted
+from helper import fetch_url, clean_url, is_blacklisted, setup_logger
+from config import LOG_LEVEL
+
+
+logger = setup_logger(name='Yandex', level=LOG_LEVEL)
 
 
 class Yahoo:
@@ -25,7 +29,9 @@ class Yahoo:
 
         duplicate_page = 0
         referrer = self.base_url
+        page = 1
         while True:
+            logger.info(f'Page: {page}')
             html = fetch_url(url, headers={'Referer': referrer})
             links = self.get_links(html)
 
@@ -38,7 +44,7 @@ class Yahoo:
 
                     if link not in result:
                         duplicate = False
-                        print('[Yahoo]', link)
+                        logger.info(link)
                         result.append(link)
                 if duplicate:
                     duplicate_page += 1
@@ -52,6 +58,7 @@ class Yahoo:
                 url = next_page
             else:
                 break
+            page += 1
 
         result = list(dict.fromkeys(result))
         return result

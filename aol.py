@@ -1,7 +1,11 @@
 import re
 from urllib.parse import urljoin, urlencode, unquote
-from helper import fetch_url, clean_url, is_blacklisted, valid_url
+from helper import fetch_url, clean_url, is_blacklisted, valid_url, setup_logger
 from html_parser import NativeHTMLParser
+from config import LOG_LEVEL
+
+
+logger = setup_logger(name='Aol', level=LOG_LEVEL)
 
 
 class Aol:
@@ -27,7 +31,9 @@ class Aol:
 
         duplicate_page = 0
         referrer = 'https://www.aol.com'
+        page = 1
         while True:
+            logger.info(f'Page: {page}')
             html = fetch_url(url, headers={'Referer': referrer})
             links = self.get_links(html)
 
@@ -40,7 +46,7 @@ class Aol:
 
                     if link not in result:
                         duplicate = False
-                        print('[Aol]', link)
+                        logger.info(link)
                         result.append(link)
                 if duplicate:
                     duplicate_page += 1
@@ -54,6 +60,7 @@ class Aol:
                 url = next_page
             else:
                 break
+            page += 1
 
         result = list(dict.fromkeys(result))
         return result
@@ -107,9 +114,9 @@ class Aol:
                 web_url = re.search(patern_url, temp_url, re.I)
                 if web_url:
                     try:
-                        link = clean_url(unquote(web_url.group(1)))
-                        if link:
-                            result.append(link)
+                        url = valid_url(unquote(web_url.group(1)))
+                        if url:
+                            result.append(url)
                     except IndexError:
                         pass
 

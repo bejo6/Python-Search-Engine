@@ -10,4 +10,7 @@ DOMAIN_BLACKLIST = [
     'quora.com',
     'amazon.com',
     'ask.com',
+    'facebook.com',
+    'yandex.com',
+    'yandex.ru',
 ]
