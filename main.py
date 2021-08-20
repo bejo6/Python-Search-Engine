@@ -2,15 +2,31 @@ import os
 import sys
 import getopt
 import threading
+from helper import setup_logger
+from config import LOG_LEVEL
 from bing import Bing
 from yahoo import Yahoo
 from google import Google
 from ask import Ask
 from aol import Aol
+from yandex import Yandex
+
+
+logger = setup_logger(level=LOG_LEVEL)
 
 
 def usage():
-    print('usage')
+    output = [
+        'Usage: python {} [OPTIONS]'.format(sys.argv[0]),
+        'OPTIONS:',
+        '    -h, --help: Show this help message',
+        '    -s, --search: Keyword to search',
+        '    -o, --output: output file path',
+        'EXAMPLES:',
+        '    python {} -k "john doe" -o output.txt'.format(sys.argv[0]),
+    ]
+    print('\n'.join([f'[*] {o}' for o in output]))
+    sys.exit(1)
 
 
 def save_links(links: list, filename: str = 'results.txt'):
@@ -41,6 +57,7 @@ def engine_start(keyword: str, output: str = None):
         Google(),
         Ask(),
         Aol(),
+        Yandex(),
     ]
 
     threads = []
@@ -59,17 +76,17 @@ def engine_start(keyword: str, output: str = None):
 
 def main():
     try:
-        opts, args = getopt.getopt(sys.argv[1:], 'k:o:h', ['keyword=', 'output=', 'help'])
+        opts, args = getopt.getopt(sys.argv[1:], 's:o:h', ['search=', 'output=', 'help'])
     except getopt.GetoptError as err:
-        print(err)
+        logger.error(err)
         usage()
         sys.exit(2)
 
     output = None
-    keyword = None
+    search = None
     for o, a in opts:
-        if o in ("-k", "--keyword"):
-            keyword = a
+        if o in ("-s", "--search"):
+            search = a
         elif o in ("-o", "--output"):
             output = a
         elif o in ("-h", "--help"):
@@ -78,8 +95,11 @@ def main():
         else:
             assert False, "unhandled option"
 
-    if keyword:
-        engine_start(keyword=keyword, output=output)
+    if not search:
+        usage()
+        sys.exit()
+
+    engine_start(keyword=search, output=output)
 
 
 if __name__ == '__main__':
