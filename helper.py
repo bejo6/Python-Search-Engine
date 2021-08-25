@@ -1,3 +1,4 @@
+import gzip
 import os
 import re
 import hashlib
@@ -72,9 +73,11 @@ def fetch_url(url, delete_cookie=False, headers: dict = None):
     _userAgent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:91.0) Gecko/20100101 Firefox/91.0'
     _request = Request(url)
     _request.add_header('User-Agent', _userAgent)
+
     if headers:
         for key in headers:
-            _request.add_header(key, headers.get(key))
+            header_value = headers.get(key)
+            _request.add_header(key, header_value)
 
     _cookieFile = cookie_file(url)
     if _cookieFile:
@@ -91,12 +94,17 @@ def fetch_url(url, delete_cookie=False, headers: dict = None):
         handler = HTTPCookieProcessor(cookie)
         opener = build_opener(handler)
         _response = fetch_open(_request, opener)
+
     else:
         _response = fetch_open(_request)
 
     if _response:
         try:
-            _result, _ = decode_bytes(_response.read())
+            content_encoding = _response.getheader('Content-Encoding')
+            if content_encoding and content_encoding.lower() == 'gzip':
+                _result, _ = decode_bytes(gzip.decompress(_response.read()))
+            else:
+                _result, _ = decode_bytes(_response.read())
         except Exception as err:
             print(err)
 
