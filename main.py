@@ -11,6 +11,7 @@ from ask import Ask
 from aol import Aol
 from yandex import Yandex
 from naver import Naver
+from seznam import Seznam
 
 
 logger = setup_logger(level=LOG_LEVEL)
@@ -60,6 +61,7 @@ def engine_start(keyword: str, output: str = None):
         Aol(),
         Yandex(),
         Naver(),
+        Seznam(),
     ]
 
     threads = []
