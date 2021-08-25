@@ -13,4 +13,6 @@ DOMAIN_BLACKLIST = [
     'facebook.com',
     'yandex.com',
     'yandex.ru',
+    'naver.com',
+    'seznam.cz',
 ]
