@@ -23,7 +23,6 @@ class Seznam:
         if search_url:
             search_url = urljoin(self.search_url, search_url)
 
-        # return search_url
         return self.search_run(search_url)
 
     def search_run(self, url: str) -> list:
@@ -32,7 +31,6 @@ class Seznam:
             return result
 
         duplicate_page = 0
-        # headers = {'Accept-Encoding': 'gzip', 'Referer': self.base_url}
         headers = {'Referer': self.base_url}
         page = 1
         while True:
@@ -71,8 +69,7 @@ class Seznam:
     def build_query(self, html: str = None) -> str:
         search_url = ''
         if not html:
-            headers = {'Accept-Encoding': 'gzip'}
-            html = fetch_url(self.base_url, delete_cookie=True, headers=headers)
+            html = fetch_url(self.base_url, delete_cookie=True)
 
         _parser = NativeHTMLParser()
         root = _parser.feed(html)
