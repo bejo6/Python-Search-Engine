@@ -1,4 +1,5 @@
 import gzip
+import json
 import os
 import re
 import hashlib
@@ -67,11 +68,20 @@ def cookie_file(url, ext='_cookie'):
     return _cookieFile
 
 
-def fetch_url(url, delete_cookie=False, headers: dict = None):
+def fetch_url(url, delete_cookie=False, headers: dict = None, data: dict = None, method: str = None):
     _result = ''
     _response = None
     _userAgent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:91.0) Gecko/20100101 Firefox/91.0'
-    _request = Request(url)
+    if data:
+        _data = str(json.dumps(data)).encode('utf-8')
+        _request = Request(url, data=_data)
+    else:
+        _request = Request(url)
+
+    methods = ['GET', 'HEAD', 'POST', 'PUT', 'DELETE', 'CONNECT', 'OPTIONS', 'TRACE', 'PATCH']
+    if method.upper() in methods:
+        _request.method = method.upper()
+
     _request.add_header('User-Agent', _userAgent)
 
     if headers:
@@ -93,7 +103,7 @@ def fetch_url(url, delete_cookie=False, headers: dict = None):
 
         handler = HTTPCookieProcessor(cookie)
         opener = build_opener(handler)
-        _response = fetch_open(_request, opener)
+        _response = fetch_open(_request, method=opener)
 
     else:
         _response = fetch_open(_request)
@@ -113,6 +123,7 @@ def fetch_url(url, delete_cookie=False, headers: dict = None):
 
 def fetch_open(req: Request, method=None, debug=True):
     _result = None
+
     try:
         if isinstance(method, OpenerDirector):
             _result = method.open(req, timeout=10)
