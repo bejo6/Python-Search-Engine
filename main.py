@@ -12,6 +12,7 @@ from aol import Aol
 from yandex import Yandex
 from naver import Naver
 from seznam import Seznam
+from lycos import Lycos
 
 
 logger = setup_logger(level=LOG_LEVEL)
@@ -62,6 +63,7 @@ def engine_start(keyword: str, output: str = None):
         Yandex(),
         Naver(),
         Seznam(),
+        Lycos(),
     ]
 
     threads = []
