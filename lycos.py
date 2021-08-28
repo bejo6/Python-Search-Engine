@@ -1,9 +1,9 @@
 import re
-from urllib.parse import urljoin, urlencode
-from helper import fetch_url, is_blacklisted, valid_url, setup_logger
+from urllib.parse import urljoin, urlencode, urlparse, parse_qs
+from blacklist import is_blacklisted
+from helper import fetch_url, valid_url, setup_logger
 from html_parser import NativeHTMLParser
 from config import LOG_LEVEL
-import urllib.parse
 
 
 logger = setup_logger(name='Lycos', level=LOG_LEVEL)
@@ -31,7 +31,7 @@ class Lycos:
         referrer = self.base_url
         page = 1
         while True:
-            logger.info(f'Page: {page} {url}')
+            logger.info(f'Page: {page}')
             html = fetch_url(url, headers={'Referer': referrer})
             links = self.get_links(html)
 
@@ -121,24 +121,24 @@ class Lycos:
 
         for link in links:
             _href = link.get('href')
-            urlparse = urllib.parse.urlparse(_href)
-            if urlparse:
-                query = urlparse.query
-                if not query:
+            _urlparse = urlparse(_href)
+            if _urlparse:
+                _query = _urlparse.query
+                if not _query:
                     continue
 
-                parse_qs = urllib.parse.parse_qs(query)
-                if not isinstance(parse_qs, dict):
+                _parse_qs = parse_qs(_query)
+                if not isinstance(_parse_qs, dict):
                     continue
 
-                urls = parse_qs.get('as')
+                urls = _parse_qs.get('as')
                 if not isinstance(urls, (list, tuple)):
                     continue
 
                 url = valid_url(urls[0])
                 if url:
                     if '..' in url:
-                        p = urllib.parse.urlparse(url)
+                        p = urlparse(url)
                         url = f'{p.scheme}://{p.netloc}'
 
                     result.append(url)

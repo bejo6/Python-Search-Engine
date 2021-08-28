@@ -1,6 +1,7 @@
 import re
 from urllib.parse import urljoin, urlencode, unquote
-from helper import fetch_url, clean_url, is_blacklisted, setup_logger
+from helper import fetch_url, clean_url, setup_logger
+from blacklist import is_blacklisted
 from config import LOG_LEVEL
 
 
