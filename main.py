@@ -14,6 +14,7 @@ from naver import Naver
 from seznam import Seznam
 from lycos import Lycos
 from metager import MetaGer
+from mojeek import Mojeek
 
 
 logger = setup_logger(level=LOG_LEVEL)
@@ -70,6 +71,7 @@ def engine_start(keyword: str, output: str = None):
         Seznam(),
         Lycos(),
         MetaGer(),
+        Mojeek(),
     ]
 
     threads = []
