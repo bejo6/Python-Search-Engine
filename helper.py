@@ -9,7 +9,6 @@ from html import unescape
 from urllib.parse import urlparse, urldefrag, urlsplit
 from urllib.request import Request, HTTPCookieProcessor, build_opener, urlopen, OpenerDirector
 from urllib.error import HTTPError, URLError
-from blacklist import DOMAIN_BLACKLIST
 from socket import timeout
 from ssl import SSLError
 
@@ -79,7 +78,7 @@ def fetch_url(url, delete_cookie=False, headers: dict = None, data: dict = None,
         _request = Request(url)
 
     methods = ['GET', 'HEAD', 'POST', 'PUT', 'DELETE', 'CONNECT', 'OPTIONS', 'TRACE', 'PATCH']
-    if method.upper() in methods:
+    if method and method.upper() in methods:
         _request.method = method.upper()
 
     _request.add_header('User-Agent', _userAgent)
@@ -121,7 +120,28 @@ def fetch_url(url, delete_cookie=False, headers: dict = None, data: dict = None,
     return _result
 
 
-def fetch_open(req: Request, method=None, debug=True):
+def simple_fetch(url, data: dict = None):
+    _result = ''
+
+    _data = None
+    if data:
+        _data = str(json.dumps(data)).encode('utf-8')
+
+    _response = urlopen(url=url, data=_data, timeout=10)
+    if _response:
+        try:
+            content_encoding = _response.getheader('Content-Encoding')
+            if content_encoding and content_encoding.lower() == 'gzip':
+                _result, _ = decode_bytes(gzip.decompress(_response.read()))
+            else:
+                _result, _ = decode_bytes(_response.read())
+        except Exception as err:
+            print(err)
+
+    return _result
+
+
+def fetch_open(req: [str, Request], method=None, debug=True):
     _result = None
 
     try:
@@ -169,20 +189,6 @@ def valid_url(url):
         return clean_url(url)
 
     return ''
-
-
-def is_blacklisted(url: str):
-    patern_domain = r'[a-z0-9-]{1,63}\.[a-z]{2,6}(:\d+)?$'
-    parse = urlparse(url)
-    domain_name = re.search(patern_domain, parse.netloc, re.I)
-    if domain_name:
-        try:
-            domain = domain_name.group(0).lower()
-            if domain in DOMAIN_BLACKLIST:
-                return True
-        except IndexError:
-            pass
-    return False
 
 
 def setup_logger(name: str = None, level: str = 'info'):
