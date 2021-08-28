@@ -1,5 +1,6 @@
 # Directory
 /venv
+/cookie
 **/.idea
 **/__dev
 **/__pycache__
