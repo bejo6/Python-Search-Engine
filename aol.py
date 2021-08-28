@@ -64,6 +64,8 @@ class Aol:
             page += 1
 
         result = list(dict.fromkeys(result))
+        logger.info(f'Total links: {len(result)}')
+
         return result
 
     def build_query(self, html: str = None) -> str:
