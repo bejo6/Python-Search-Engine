@@ -13,6 +13,7 @@ from yandex import Yandex
 from naver import Naver
 from seznam import Seznam
 from lycos import Lycos
+from metager import MetaGer
 
 
 logger = setup_logger(level=LOG_LEVEL)
@@ -40,8 +41,12 @@ def save_links(links: list, filename: str = 'results.txt'):
 
     for link in links:
         if link not in current_links:
-            with open(filename, 'a') as f:
-                f.write(f'{link}\n')
+            with open(filename, 'a', encoding='utf-8', errors='replace') as f:
+                try:
+                    f.write(f'{link}\n')
+                except UnicodeEncodeError:
+                    logger.error(link)
+
             current_links.append(link)
 
 
@@ -64,6 +69,7 @@ def engine_start(keyword: str, output: str = None):
         Naver(),
         Seznam(),
         Lycos(),
+        MetaGer(),
     ]
 
     threads = []
