@@ -52,7 +52,7 @@ def decode_bytes(val) -> tuple:
     return decoded, charset
 
 
-def cookie_file(url, ext='_cookie'):
+def cookie_file(url, cookie_dir='cookie', ext='_cookie'):
     _cookieFile = ''
     o = urlparse(url)
     if not o.netloc:
@@ -64,7 +64,15 @@ def cookie_file(url, ext='_cookie'):
         _cookieName = hashlib.md5(_cookieStr.encode()).hexdigest()
         _cookieFile = f'{_cookieName}{ext}'
 
-    return _cookieFile
+    if os.path.exists(cookie_dir):
+        if os.path.isfile(cookie_dir):
+            os.remove(cookie_dir)
+            os.mkdir(cookie_dir)
+    else:
+        os.mkdir(cookie_dir)
+
+    cookie_path = os.path.join(cookie_dir, _cookieFile)
+    return cookie_path
 
 
 def fetch_url(url, delete_cookie=False, headers: dict = None, data: dict = None, method: str = None):
@@ -102,7 +110,7 @@ def fetch_url(url, delete_cookie=False, headers: dict = None, data: dict = None,
 
         handler = HTTPCookieProcessor(cookie)
         opener = build_opener(handler)
-        _response = fetch_open(_request, method=opener)
+        _response = fetch_open(_request, opener=opener, cookie=cookie, cookie_path=_cookieFile)
 
     else:
         _response = fetch_open(_request)
@@ -125,7 +133,7 @@ def simple_fetch(url, data: dict = None):
 
     _data = None
     if data:
-        _data = str(json.dumps(data)).encode('utf-8')
+        _data = str(json.dumps(data)).encode('utf-8', errors='replace')
 
     _response = urlopen(url=url, data=_data, timeout=10)
     if _response:
@@ -141,12 +149,14 @@ def simple_fetch(url, data: dict = None):
     return _result
 
 
-def fetch_open(req: [str, Request], method=None, debug=True):
+def fetch_open(req: [str, Request], opener=None, cookie=None, cookie_path: str = None, debug=True):
     _result = None
 
     try:
-        if isinstance(method, OpenerDirector):
-            _result = method.open(req, timeout=10)
+        if isinstance(opener, OpenerDirector):
+            _result = opener.open(req, timeout=10)
+            if cookie is not None and cookie_path is not None:
+                cookie.save(cookie_path, ignore_discard=True, ignore_expires=True)
         else:
             _result = urlopen(req, timeout=10)
     except HTTPError as err:
