@@ -15,6 +15,7 @@ from seznam import Seznam
 from lycos import Lycos
 from metager import MetaGer
 from mojeek import Mojeek
+from gigablast import Gigablast
 
 
 logger = setup_logger(level=LOG_LEVEL)
@@ -72,6 +73,7 @@ def engine_start(keyword: str, output: str = None):
         Lycos(),
         MetaGer(),
         Mojeek(),
+        Gigablast(),
     ]
 
     threads = []
