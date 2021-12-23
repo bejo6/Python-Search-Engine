@@ -1,6 +1,6 @@
 import os
 import sys
-import getopt
+import argparse
 import threading
 from helper import setup_logger
 from config import LOG_LEVEL
@@ -16,23 +16,9 @@ from lycos import Lycos
 from metager import MetaGer
 from mojeek import Mojeek
 from gigablast import Gigablast
-
+from getsearchinfo import GetSearchInfo
 
 logger = setup_logger(level=LOG_LEVEL)
-
-
-def usage():
-    output = [
-        'Usage: python {} [OPTIONS]'.format(sys.argv[0]),
-        'OPTIONS:',
-        '    -h, --help: Show this help message',
-        '    -s, --search: Keyword to search',
-        '    -o, --output: output file path',
-        'EXAMPLES:',
-        '    python {} -k "john doe" -o output.txt'.format(sys.argv[0]),
-    ]
-    print('\n'.join([f'[*] {o}' for o in output]))
-    sys.exit(1)
 
 
 def save_links(links, filename='results.txt'):
@@ -79,6 +65,7 @@ def engine_start(keyword: str, output: str = None):
         MetaGer(),
         Mojeek(),
         Gigablast(),
+        GetSearchInfo(),
     ]
 
     threads = []
@@ -96,32 +83,30 @@ def engine_start(keyword: str, output: str = None):
 
 
 def main():
-    try:
-        opts, args = getopt.getopt(sys.argv[1:], 's:o:h', ['search=', 'output=', 'help'])
-    except getopt.GetoptError as err:
-        logger.error(err)
-        usage()
-        sys.exit(2)
+    parser = argparse.ArgumentParser(usage='%(prog)s [options]')
+    # noinspection PyProtectedMember
+    parser._optionals.title = 'Options'
+    parser.add_argument('-k', '--keyword',
+                        dest='keyword',
+                        help='Keyword to search',
+                        action='store')
+    parser.add_argument('-o', '--output',
+                        dest='output_file',
+                        help='Output results (default results.txt)',
+                        default='results.txt',
+                        action='store')
 
-    output = None
-    search = None
-    for o, a in opts:
-        if o in ("-s", "--search"):
-            search = a
-        elif o in ("-o", "--output"):
-            output = a
-        elif o in ("-h", "--help"):
-            usage()
-            sys.exit()
-        else:
-            assert False, "unhandled option"
+    args = parser.parse_args()
 
-    if not search:
-        usage()
+    if not args.keyword:
+        parser.print_help()
         sys.exit()
 
-    engine_start(keyword=search, output=output)
+    engine_start(keyword=args.keyword, output=args.output_file)
 
 
 if __name__ == '__main__':
-    main()
+    try:
+        main()
+    except KeyboardInterrupt:
+        sys.exit('Quit')
