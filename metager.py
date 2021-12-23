@@ -135,7 +135,7 @@ class MetaGer:
             elif re.search(patern_redirect, url, re.I):
                 url = self.get_redirect_url(url)
 
-            if url:
+            if url and not re.search(r'metager\.org/partner/', url, re.I):
                 result.append(url)
 
         self.get_next_page(_parser.root)
