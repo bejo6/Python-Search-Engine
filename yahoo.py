@@ -1,17 +1,17 @@
 import re
 from urllib.parse import urljoin, urlencode, unquote
-from helper import fetch_url, clean_url, setup_logger
+from helper import fetch_url, validate_url, setup_logger
 from blacklist import is_blacklisted
 from config import LOG_LEVEL
 
 
-logger = setup_logger(name='Yandex', level=LOG_LEVEL)
+logger = setup_logger(name='Yahoo', level=LOG_LEVEL)
 
 
 class Yahoo:
     base_url = 'https://search.yahoo.com'
 
-    def __init__(self) -> None:
+    def __init__(self):
         self.query = {}
         self.filtering = True
 
@@ -23,7 +23,7 @@ class Yahoo:
 
         return self.search_run(search_url)
 
-    def search_run(self, url: str) -> list:
+    def search_run(self, url):
         result = []
         if not url:
             return result
@@ -32,7 +32,7 @@ class Yahoo:
         referrer = self.base_url
         page = 1
         while True:
-            logger.info(f'Page: {page}')
+            logger.info('Page: %d' % page)
             html = fetch_url(url, headers={'Referer': referrer})
             links = self.get_links(html)
 
@@ -62,11 +62,11 @@ class Yahoo:
             page += 1
 
         result = list(dict.fromkeys(result))
-        logger.info(f'Total links: {len(result)}')
+        logger.info('Total links: %d' % len(result))
 
         return result
 
-    def build_query(self, html: str = None) -> str:
+    def build_query(self, html=None):
         patern_form = r'(?:<form[^>]+role[\s=]+((?:")search(?:")|(?:\')search(?:\'))[^>]+>)[\s\S]+<\/form>'
         patern_action = r'action[\s=]+((?:")(.*?)(?:")|(?:\')(.*?)(?:\'))'
         patern_input = r'(?:<input[^>]+/?>)'
@@ -78,7 +78,7 @@ class Yahoo:
 
         search_url = ''
         if html:
-            get_form = re.search(patern_form, html, re.M | re.I)
+            get_form = re.search(patern_form, str(html), re.M | re.I)
             if get_form:
                 form_str = get_form.group(0)
                 action_val = re.search(patern_action, form_str, re.I)
@@ -99,12 +99,12 @@ class Yahoo:
                         self.query.update({name: value or ''})
 
         if search_url:
-            search_url = f'{search_url}?{urlencode(self.query)}'
+            search_url = '%s?%s' % (search_url, urlencode(self.query))
 
         return search_url
 
     @staticmethod
-    def get_links(html: str = None) -> list:
+    def get_links(html):
         result = []
         if not html:
             return result
@@ -118,11 +118,11 @@ class Yahoo:
             href = re.search(patern_href, match, re.I)
 
             if href and len(href.groups()) >= 3:
-                temp_link = clean_url(href.group(3) or href.group(2))
+                temp_link = validate_url(href.group(3) or href.group(2))
                 web_url = re.search(patern_url, temp_link, re.I)
                 if web_url:
                     try:
-                        link = clean_url(unquote(web_url.group(1)))
+                        link = validate_url(unquote(web_url.group(1)))
                         if link:
                             result.append(link)
                     except IndexError:
@@ -133,7 +133,7 @@ class Yahoo:
 
         return result
 
-    def get_next_page(self, html: str = None) -> str:
+    def get_next_page(self, html):
         next_page = ''
         if not html:
             return next_page
@@ -146,6 +146,50 @@ class Yahoo:
             href = re.search(patern_href, matches.group(0), re.I)
             if href and len(href.groups()) >= 3:
                 path = href.group(3) or href.group(2)
-                next_page = clean_url(urljoin(self.base_url, path))
+                next_page = validate_url(urljoin(self.base_url, path))
 
         return next_page
+
+
+if __name__ == '__main__':
+    import sys
+    import argparse
+    import json
+    try:
+        parser = argparse.ArgumentParser(usage='%(prog)s [options]')
+        # noinspection PyProtectedMember
+        parser._optionals.title = 'Options'
+        parser.add_argument('-k', '--keyword',
+                            dest='keyword',
+                            help='Keyword to search',
+                            action='store')
+        parser.add_argument('-s', '--save',
+                            dest='save_output',
+                            help='Save Output results',
+                            action='store_true')
+        parser.add_argument('-o', '--output',
+                            dest='output_file',
+                            help='Output results (default yahoo_results.txt)',
+                            default='yahoo_results.txt',
+                            action='store')
+
+        args = parser.parse_args()
+        if not args.keyword:
+            parser.print_help()
+            sys.exit('[!] Keyword required')
+
+        eng = Yahoo()
+        res = eng.search(args.keyword)
+
+        if args.save_output:
+            if res:
+                for rlink in res:
+                    with open(args.output_file, 'a', encoding='utf-8', errors='replace') as f:
+                        try:
+                            f.write('%s\n' % rlink)
+                        except UnicodeEncodeError:
+                            logger.error(rlink)
+        else:
+            print(json.dumps(res, indent=2, default=str))
+    except KeyboardInterrupt:
+        sys.exit('KeyboardInterrupt')

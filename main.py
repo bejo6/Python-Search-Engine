@@ -35,9 +35,12 @@ def usage():
     sys.exit(1)
 
 
-def save_links(links: list, filename: str = 'results.txt'):
+def save_links(links, filename='results.txt'):
     current_links = []
-    if os.path.isfile(filename):
+    if not isinstance(links, list):
+        return
+
+    if os.path.exists(filename) and os.path.isfile(filename):
         with open(filename, 'r') as f:
             current_links = f.read().splitlines()
 
@@ -61,6 +64,8 @@ def engine_tasks(engine, keyword: str, output: str = None):
 
 
 def engine_start(keyword: str, output: str = None):
+    logger.info('Start search with keyword: %s' % keyword)
+
     engines = [
         Bing(),
         Yahoo(),

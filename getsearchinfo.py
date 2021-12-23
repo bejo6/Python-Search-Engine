@@ -1,26 +1,27 @@
 import re
-import base64
-from urllib.parse import urljoin, urlencode, urlparse, unquote, parse_qs
+from urllib.parse import urljoin, urlencode
 from blacklist import is_blacklisted
-from helper import fetch_url, setup_logger, decode_bytes, validate_url
+from helper import fetch_url, setup_logger, validate_url
 from html_parser import NativeHTMLParser
 from config import LOG_LEVEL
 
 
-logger = setup_logger(name='metaGer', level=LOG_LEVEL)
+logger = setup_logger(name='GetSearchInfo', level=LOG_LEVEL)
 
 
-class MetaGer:
-    base_url = 'https://metager.org'
-    next_page = ''
+class GetSearchInfo:
+    base_url = 'https://www.getsearchinfo.com'
 
     def __init__(self):
         self.query = {}
-        self.user_agent = None
         self.filtering = True
 
     def search(self, keyword):
-        search_url = self.build_query(keyword=keyword)
+        self.query.update({'q': str(keyword)})
+        search_url = self.build_query()
+        if search_url:
+            search_url = urljoin(self.base_url, search_url)
+
         return self.search_run(search_url)
 
     def search_run(self, url):
@@ -29,14 +30,19 @@ class MetaGer:
             return result
 
         duplicate_page = 0
+        empty_page = 0
         referrer = self.base_url
         page = 1
         while True:
-            logger.info('Page: %d %s' % (page, url))
+            logger.info('Page: %s' % page)
             html = fetch_url(url, headers={'Referer': referrer})
             links = self.get_links(html)
 
-            if links:
+            if not links:
+                empty_page += 1
+                if page > 1:
+                    break
+            else:
                 duplicate = True
                 for link in links:
                     if self.filtering:
@@ -53,9 +59,13 @@ class MetaGer:
             if duplicate_page >= 3:
                 break
 
-            if self.next_page and self.next_page != url:
+            if empty_page >= 2:
+                break
+
+            next_page = self.get_next_page(html)
+            if next_page and next_page != url:
                 referrer = url
-                url = self.next_page
+                url = next_page
             else:
                 break
             page += 1
@@ -65,7 +75,7 @@ class MetaGer:
 
         return result
 
-    def build_query(self, keyword, html=None):
+    def build_query(self, html=None):
         search_url = ''
         if not html:
             html = fetch_url(self.base_url, delete_cookie=True)
@@ -77,32 +87,27 @@ class MetaGer:
         if _parser.root is None:
             return search_url
 
-        form_search = _parser.root.find('.//form[@id="searchForm"]')
+        form_header = _parser.root.find('.//form[@name="searchform-top"]')
 
-        if form_search:
-            action = form_search.get('action')
-            if action:
-                search_url = action.strip()
-
-            inputs = form_search.findall('.//input')
+        if form_header:
+            search_url = form_header.get('action')
+            inputs = form_header.findall('.//input[@type="hidden"]')
             for inp in inputs:
                 _name = inp.get('name')
                 _value = inp.get('value')
-
                 if not _name:
                     continue
 
-                if _name != 'eingabe':
+                if _name != 'q':
                     self.query.update({_name: _value or ''})
-                else:
-                    self.query.update({_name: keyword})
 
         if search_url:
             search_url = '%s?%s' % (search_url, urlencode(self.query))
 
         return search_url
 
-    def get_links(self, html):
+    @staticmethod
+    def get_links(html):
         result = []
         if not html:
             return result
@@ -114,82 +119,41 @@ class MetaGer:
         if _parser.root is None:
             return result
 
-        iframe = _parser.root.find('.//iframe[@id="mg-framed"]')
-        links = _parser.root.findall('.//a[@class="result-link"]')
-
-        if not links and iframe is not None:
-            iframe_src = iframe.get('src')
-            iframe_url = validate_url(iframe_src)
-            if iframe_url:
-                iframe_html = fetch_url(iframe_url)
-                return self.get_links(iframe_html)
+        links = _parser.root.findall('.//div[@class="PartialSearchResults-item-title"]//a')
 
         for link in links:
+            _class = link.get('class')
             _href = link.get('href')
-            url = validate_url(_href)
-
-            patern_metager = r'\/r\/metager\/'
-            patern_redirect = r'\/redir\/clickGate'
-            if re.search(patern_metager, url, re.I):
-                url = self.get_url_base64(url)
-            elif re.search(patern_redirect, url, re.I):
-                url = self.get_redirect_url(url)
-
-            if url:
-                result.append(url)
-
-        self.get_next_page(_parser.root)
+            if _class and re.search(r'result-link', _class, re.I):
+                valid_url = validate_url(_href)
+                if valid_url:
+                    valid_url = re.sub(r'\?utm_content=.+$', '', valid_url)
+                    result.append(valid_url)
 
         if result:
             result = list(dict.fromkeys(result))
 
         return result
 
-    def get_next_page(self, root):
-        self.next_page = ''
-        next_search_link = root.find('.//div[@id="next-search-link"]')
-        if next_search_link is None:
-            return
+    def get_next_page(self, html):
+        next_page = ''
+        if not html:
+            return next_page
 
-        _next = next_search_link.find('a')
-        if _next is not None:
-            _href = _next.get('href')
+        _parser = NativeHTMLParser()
+        _parser.feed(str(html))
+        _parser.close()
+
+        if _parser.root is None:
+            return next_page
+
+        find_next_page = _parser.root.find('.//li[@class="PartialWebPagination-next"]//a')
+        if find_next_page is not None:
+            _href = find_next_page.get('href')
             if _href:
-                self.next_page = validate_url(urljoin(self.base_url, _href))
+                next_page = validate_url(urljoin(self.base_url, _href))
 
-    @staticmethod
-    def get_url_base64(url):
-        _url = ''
-        _parse = urlparse(str(url))
-        _split = _parse.path.split('/', maxsplit=5)
-        if len(_split) >= 6:
-            _urlbase64 = unquote(_split[-1])
-            _urlbase64 = re.sub(r'<+slash>+', '/', _urlbase64, flags=re.I)
-            _decode = base64.urlsafe_b64decode(_urlbase64)
-            _url, _ = decode_bytes(_decode)
-
-        return _url
-
-    @staticmethod
-    def get_redirect_url(url):
-        _url = ''
-        _parse = urlparse(str(url))
-        _query = _parse.query
-        _parse_qs = parse_qs(_query)
-
-        urls = _parse_qs.get('url')
-        if not isinstance(urls, (list, tuple)):
-            return _url
-
-        first_url = validate_url(urls[0])
-        if first_url:
-            if '..' in first_url:
-                p = urlparse(url)
-                first_url = '%s://%s' % (p.scheme, p.netloc)
-
-            _url = first_url
-
-        return _url
+        return next_page
 
 
 if __name__ == '__main__':
@@ -210,8 +174,8 @@ if __name__ == '__main__':
                             action='store_true')
         parser.add_argument('-o', '--output',
                             dest='output_file',
-                            help='Output results (default metager_results.txt)',
-                            default='metager_results.txt',
+                            help='Output results (default getsearchinfo_results.txt)',
+                            default='getsearchinfo_results.txt',
                             action='store')
 
         args = parser.parse_args()
@@ -219,7 +183,7 @@ if __name__ == '__main__':
             parser.print_help()
             sys.exit('[!] Keyword required')
 
-        eng = MetaGer()
+        eng = GetSearchInfo()
         res = eng.search(args.keyword)
 
         if args.save_output:

@@ -2,26 +2,26 @@ import re
 import random
 from urllib.parse import urljoin, urlencode
 from blacklist import is_blacklisted
-from helper import fetch_url, clean_url, valid_url, setup_logger
+from helper import fetch_url, setup_logger, validate_url
 from config import LOG_LEVEL
 
 
-logger = setup_logger(name='Yandex', level=LOG_LEVEL)
+logger = setup_logger(name='Google', level=LOG_LEVEL)
 
 
 class Google:
     base_url = 'https://www.google.com'
 
-    def __init__(self) -> None:
+    def __init__(self):
         self.query = {}
         self.user_agent = None
         self.filtering = True
 
-    def search(self, keyword: str):
-        search_url = self.build_query(keyword)
+    def search(self, keyword):
+        search_url = self.build_query(str(keyword))
         return self.search_run(search_url)
 
-    def search_run(self, url: str) -> list:
+    def search_run(self, url):
         result = []
         if not url:
             return result
@@ -30,7 +30,7 @@ class Google:
         headers = {'User-Agent': self.user_agent}
         page = 1
         while True:
-            logger.info(f'Page: {page}')
+            logger.info('Page: %d' % page)
             html = fetch_url(url, headers=headers)
             links = self.get_links(html)
 
@@ -52,7 +52,7 @@ class Google:
                 break
 
             next_page = self.get_next_page(html)
-            if next_page:
+            if next_page and next_page != url:
                 headers.update({'Referer': url})
                 url = next_page
             else:
@@ -60,25 +60,25 @@ class Google:
             page += 1
 
         result = list(dict.fromkeys(result))
-        logger.info(f'Total links: {len(result)}')
+        logger.info('Total links: %d' % len(result))
 
         return result
 
-    def build_query(self, keyword: str = None) -> str:
+    def build_query(self, keyword):
         self.build_clients(keyword)
         search_url = urljoin(self.base_url, '/search')
-        url = f'{search_url}?{urlencode(self.query)}'
+        url = '%s?%s' % (search_url, urlencode(self.query))
 
         return url
 
-    def build_clients(self, keyword: str = None):
+    def build_clients(self, keyword):
         RAND_MS = random.randint(1552, 2568)
         client_brave = {
             'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/92.0.4515.131 Safari/537.36',
             'params': {
                 'q': keyword,
                 'oq': keyword,
-                'aqs': f'chrome..69i57.{RAND_MS}j0j1',
+                'aqs': 'chrome..69i57.%dj0j1' % RAND_MS,
                 'sourceid': 'chrome',
                 'ie': 'UTF-8',
             }
@@ -88,7 +88,7 @@ class Google:
             'params': {
                 'q': keyword,
                 'oq': keyword,
-                'aqs': f'edge..69i57.{RAND_MS}j0j1',
+                'aqs': 'edge..69i57.%dj0j1' % RAND_MS,
                 'sourceid': 'chrome',
                 'ie': 'UTF-8',
             }
@@ -121,24 +121,29 @@ class Google:
         self.user_agent = client.get('user_agent')
 
     @staticmethod
-    def get_links(html: str = None) -> list:
+    def get_links(html):
         result = []
         if not html:
             return result
 
         patern_links = r'(?:<a[^>]+data-ved[\s=]+[^>]+>)'
         patern_href = r'href[\s=]+((?:")(.*?)(?:")|(?:\')(.*?)(?:\'))'
+        patern_google_cache = r'(https?://)webcache\.googleusercontent\.[^\/]+/search\?q=cache:[^:]+:' \
+                              r'(https?://)?(.+?)(\+?(&cd=[^&]+)(&hl=[^&]+)?(&ct=[^&]+)?(&gl=[^&]+)?.*)'
 
-        matches = re.findall(patern_links, html, re.M | re.I)
+        matches = re.findall(patern_links, str(html), re.M | re.I)
         for match in matches:
             href = re.search(patern_href, match, re.I)
 
             if href and len(href.groups()) >= 3:
                 try:
-                    link = valid_url(href.group(3) or href.group(2))
-                    if link:
-                        # result.append(unquote(link))
-                        result.append(link)
+                    valid_url = validate_url(href.group(3) or href.group(2))
+                    if valid_url:
+                        cache_link = re.search(patern_google_cache, valid_url, re.I)
+                        if cache_link:
+                            result.append('%s%s' % (cache_link.group(1), cache_link.group(3)))
+                        else:
+                            result.append(valid_url)
                 except IndexError:
                     pass
 
@@ -147,7 +152,7 @@ class Google:
 
         return result
 
-    def get_next_page(self, html: str = None) -> str:
+    def get_next_page(self, html):
         next_page = ''
         if not html:
             return next_page
@@ -155,11 +160,55 @@ class Google:
         patern_next = r'(?:<a[^>]+id[\s=]+((?:")pnnext(?:")|(?:\')pnnext(?:\'))[^>]+>)'
         patern_href = r'href[\s=]+((?:")(.*?)(?:")|(?:\')(.*?)(?:\'))'
 
-        matches = re.search(patern_next, html, re.M | re.I)
+        matches = re.search(patern_next, str(html), re.M | re.I)
         if matches:
             href = re.search(patern_href, matches.group(0), re.I)
             if href and len(href.groups()) >= 3:
                 path = href.group(3) or href.group(2)
-                next_page = clean_url(urljoin(self.base_url, path))
+                next_page = validate_url(urljoin(self.base_url, path))
 
         return next_page
+
+
+if __name__ == '__main__':
+    import sys
+    import argparse
+    import json
+    try:
+        parser = argparse.ArgumentParser(usage='%(prog)s [options]')
+        # noinspection PyProtectedMember
+        parser._optionals.title = 'Options'
+        parser.add_argument('-k', '--keyword',
+                            dest='keyword',
+                            help='Keyword to search',
+                            action='store')
+        parser.add_argument('-s', '--save',
+                            dest='save_output',
+                            help='Save Output results',
+                            action='store_true')
+        parser.add_argument('-o', '--output',
+                            dest='output_file',
+                            help='Output results (default google_results.txt)',
+                            default='google_results.txt',
+                            action='store')
+
+        args = parser.parse_args()
+        if not args.keyword:
+            parser.print_help()
+            sys.exit('[!] Keyword required')
+
+        eng = Google()
+        res = eng.search(args.keyword)
+
+        if args.save_output:
+            if res:
+                for rlink in res:
+                    with open(args.output_file, 'a', encoding='utf-8', errors='replace') as f:
+                        try:
+                            f.write('%s\n' % rlink)
+                        except UnicodeEncodeError:
+                            logger.error(rlink)
+        else:
+            print(json.dumps(res, indent=2, default=str))
+    except KeyboardInterrupt:
+        sys.exit('KeyboardInterrupt')

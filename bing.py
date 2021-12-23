@@ -1,7 +1,7 @@
 import re
 from urllib.parse import urljoin, urlencode
 from blacklist import is_blacklisted
-from helper import fetch_url, clean_url, setup_logger
+from helper import fetch_url, setup_logger, validate_url
 from config import LOG_LEVEL
 
 
@@ -11,7 +11,7 @@ logger = setup_logger(name='Bing', level=LOG_LEVEL)
 class Bing:
     base_url = 'https://www.bing.com'
 
-    def __init__(self) -> None:
+    def __init__(self):
         self.query = {}
         self.filtering = True
 
@@ -20,18 +20,18 @@ class Bing:
         self.build_query()
 
         search_url = urljoin(self.base_url, '/search')
-        url = f'{search_url}?{urlencode(self.query)}'
+        url = '%s?%s' % (search_url, urlencode(self.query))
 
         return self.search_run(url)
 
-    def search_run(self, url: str) -> list:
+    def search_run(self, url):
         result = []
         duplicate_page = 0
         referrer = self.base_url
         page = 1
         while True:
-            logger.info(f'Page: {page}')
-            html = fetch_url(url, headers={'Referer': referrer})
+            logger.info('Page: %d' % page)
+            html = fetch_url(str(url), headers={'Referer': referrer})
             links = self.get_links(html)
 
             if links:
@@ -51,7 +51,7 @@ class Bing:
                 break
 
             next_page = self.get_next_page(html)
-            if next_page:
+            if next_page and next_page != url:
                 referrer = url
                 url = next_page
             else:
@@ -59,7 +59,7 @@ class Bing:
             page += 1
 
         result = list(dict.fromkeys(result))
-        logger.info(f'Total links: {len(result)}')
+        logger.info('Total links: %d' % len(result))
 
         return result
 
@@ -76,7 +76,7 @@ class Bing:
             if cvid:
                 self.query.update({'cvid': cvid})
 
-    def get_query_form_value(self, html: str = None) -> str:
+    def get_query_form_value(self, html=None):
         form_value = ''
         if not html:
             html = fetch_url(self.base_url, delete_cookie=True)
@@ -85,7 +85,7 @@ class Bing:
         patern_input_form = r'name[\s=]+((?:")form(?:")|(?:\')form(?:\'))'
         patern_input_value = r'value[\s=]+(?:\'|")(.*?)(?:\'|")'
 
-        inputs = re.findall(patern_input, html, re.I)
+        inputs = re.findall(patern_input, str(html), re.I)
         for _input in inputs:
             if re.search(patern_input_form, _input, re.I):
                 get_value = re.search(patern_input_value, _input, re.I)
@@ -95,14 +95,14 @@ class Bing:
 
         return form_value
 
-    def get_query_cvid(self, html: str = None) -> str:
+    def get_query_cvid(self, html=None):
         cvid = ''
         if not html:
             html = fetch_url(self.base_url, delete_cookie=True)
 
         patern_ig = r'IG[\s:]+(?:")([A-F0-9]+)(?:")|(?:\')([A-F0-9]+)(?:\')'
 
-        get_ig = re.search(patern_ig, html, re.I)
+        get_ig = re.search(patern_ig, str(html), re.I)
         if get_ig:
             for ig in get_ig.groups():
                 if ig:
@@ -112,7 +112,7 @@ class Bing:
         return cvid
 
     @staticmethod
-    def get_links(html: str = None) -> list:
+    def get_links(html):
         result = []
         if not html:
             return result
@@ -120,20 +120,20 @@ class Bing:
         patern_links = r'<(\s+)?(li|div)\s+class[\s=]+((?:")b_algo(?:")|(?:\')b_algo(?:\'))(\s+)?>(\s+)?<(\s+)?(h2|p)(\s+)?>(\s+)?<(\s+)?a\s+(.*?)>'
         patern_href = r'href[\s=]+((?:")(.*?)(?:")|(?:\')(.*?)(?:\'))'
 
-        matches = re.findall(patern_links, html, re.M | re.I)
+        matches = re.findall(patern_links, str(html), re.M | re.I)
         for match in matches:
             href = re.search(patern_href, match[-1], re.I)
             if href and len(href.groups()) >= 3:
-                link = clean_url(href.group(3) or href.group(2))
-                if link:
-                    result.append(link)
+                valid_url = validate_url(href.group(3) or href.group(2))
+                if valid_url:
+                    result.append(valid_url)
 
         if result:
             result = list(dict.fromkeys(result))
 
         return result
 
-    def get_next_page(self, html: str = None) -> str:
+    def get_next_page(self, html=None):
         next_page = ''
         if not html:
             return next_page
@@ -141,12 +141,56 @@ class Bing:
         patern_sbpagn = r'(?:<a[^>]+(sb_pagN(_bp)?)+[^>]+>)'
         patern_href = r'href[\s=]+((?:")(.*?)(?:")|(?:\')(.*?)(?:\'))'
 
-        matches = re.search(patern_sbpagn, html, re.M | re.I)
+        matches = re.search(patern_sbpagn, str(html), re.M | re.I)
         if matches:
             href = re.search(patern_href, matches.group(0), re.I)
 
             if href and len(href.groups()) >= 3:
                 path = href.group(3) or href.group(2)
-                next_page = clean_url(urljoin(self.base_url, path))
+                next_page = validate_url(urljoin(self.base_url, path))
 
         return next_page
+
+
+if __name__ == '__main__':
+    import sys
+    import argparse
+    import json
+    try:
+        parser = argparse.ArgumentParser(usage='%(prog)s [options]')
+        # noinspection PyProtectedMember
+        parser._optionals.title = 'Options'
+        parser.add_argument('-k', '--keyword',
+                            dest='keyword',
+                            help='Keyword to search',
+                            action='store')
+        parser.add_argument('-s', '--save',
+                            dest='save_output',
+                            help='Save Output results',
+                            action='store_true')
+        parser.add_argument('-o', '--output',
+                            dest='output_file',
+                            help='Output results (default bing_results.txt)',
+                            default='bing_results.txt',
+                            action='store')
+
+        args = parser.parse_args()
+        if not args.keyword:
+            parser.print_help()
+            sys.exit('[!] Keyword required')
+
+        eng = Bing()
+        res = eng.search(args.keyword)
+
+        if args.save_output:
+            if res:
+                for rlink in res:
+                    with open(args.output_file, 'a', encoding='utf-8', errors='replace') as f:
+                        try:
+                            f.write('%s\n' % rlink)
+                        except UnicodeEncodeError:
+                            logger.error(rlink)
+        else:
+            print(json.dumps(res, indent=2, default=str))
+    except KeyboardInterrupt:
+        sys.exit('KeyboardInterrupt')
