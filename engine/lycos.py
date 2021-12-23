@@ -1,27 +1,29 @@
 import re
-from urllib.parse import urljoin, urlencode
-from blacklist import is_blacklisted
-from helper import fetch_url, setup_logger, validate_url
-from html_parser import NativeHTMLParser
-from config import LOG_LEVEL
+from logging import DEBUG
+from urllib.parse import urljoin, urlencode, urlparse, parse_qs
+from utils.blacklist import is_blacklisted
+from utils.helper import setup_logger, validate_url, split_url
+from libs.html_parser import NativeHTMLParser
+from libs.fetch import FetchRequest
+
+logger = setup_logger(name='Lycos')
 
 
-logger = setup_logger(name='GetSearchInfo', level=LOG_LEVEL)
+class Lycos:
+    base_url = 'https://www.lycos.com'
+    search_url = 'https://search.lycos.com/web'
 
-
-class GetSearchInfo:
-    base_url = 'https://www.getsearchinfo.com'
-
-    def __init__(self):
+    def __init__(self, debug=False):
+        self.debug = debug
+        self.fetch = FetchRequest()
         self.query = {}
         self.filtering = True
 
-    def search(self, keyword):
-        self.query.update({'q': str(keyword)})
-        search_url = self.build_query()
-        if search_url:
-            search_url = urljoin(self.base_url, search_url)
+        if self.debug:
+            logger.setLevel(DEBUG)
 
+    def search(self, keyword):
+        search_url = self.build_query(keyword=str(keyword))
         return self.search_run(search_url)
 
     def search_run(self, url):
@@ -31,11 +33,15 @@ class GetSearchInfo:
 
         duplicate_page = 0
         empty_page = 0
-        referrer = self.base_url
+        headers = {'Referer': self.base_url}
         page = 1
         while True:
-            logger.info('Page: %s' % page)
-            html = fetch_url(url, headers={'Referer': referrer})
+            if self.debug:
+                logger.debug('Page: %s %s' % (page, url))
+            else:
+                logger.info('Page: %s' % page)
+
+            html = self.fetch.get(url, headers=headers)
             links = self.get_links(html)
 
             if not links:
@@ -47,12 +53,16 @@ class GetSearchInfo:
                 for link in links:
                     if self.filtering:
                         if is_blacklisted(link):
+                            logger.debug('[BLACKLIST] %s' % link)
                             continue
 
                     if link not in result:
                         duplicate = False
                         logger.info(link)
                         result.append(link)
+                    else:
+                        logger.debug('[EXIST] %s' % link)
+
                 if duplicate:
                     duplicate_page += 1
 
@@ -64,7 +74,7 @@ class GetSearchInfo:
 
             next_page = self.get_next_page(html)
             if next_page and next_page != url:
-                referrer = url
+                headers.update({'Referer': url})
                 url = next_page
             else:
                 break
@@ -75,10 +85,21 @@ class GetSearchInfo:
 
         return result
 
-    def build_query(self, html=None):
+    def build_query(self, keyword, html=None):
         search_url = ''
         if not html:
-            html = fetch_url(self.base_url, delete_cookie=True)
+            html = self.fetch.get(self.base_url)
+
+        patern_keyvol = r'\#keyvol[.)"\'\s]+val[("\'\s]+([a-f0-9]+)[)"\'\s]+;'
+        match_keyvol = re.search(patern_keyvol, str(html), re.I)
+        if match_keyvol:
+            try:
+                self.query.update({
+                    'q': keyword,
+                    'keyvol': match_keyvol.group(1)
+                })
+            except IndexError:
+                pass
 
         _parser = NativeHTMLParser()
         _parser.feed(str(html))
@@ -87,22 +108,26 @@ class GetSearchInfo:
         if _parser.root is None:
             return search_url
 
-        form_header = _parser.root.find('.//form[@name="searchform-top"]')
+        form_search = _parser.root.find('.//form[@id="form_query"]')
 
-        if form_header:
-            search_url = form_header.get('action')
-            inputs = form_header.findall('.//input[@type="hidden"]')
-            for inp in inputs:
-                _name = inp.get('name')
-                _value = inp.get('value')
-                if not _name:
-                    continue
+        if form_search:
+            search_url = form_search.get('action')
+            _input = form_search.find('.//input[@id="keyvol"]')
+            if _input:
+                _name = _input.get('name')
+                _value = _input.get('value')
+                if _name == 'keyvol':
+                    if 'keyvol' not in self.query:
+                        self.query.update({
+                            'q': keyword,
+                            'keyvol': _value
+                        })
 
-                if _name != 'q':
-                    self.query.update({_name: _value or ''})
-
-        if search_url:
+        if search_url and self.query:
+            self.search_url = search_url
             search_url = '%s?%s' % (search_url, urlencode(self.query))
+        elif self.query:
+            search_url = '%s?%s' % (self.search_url, urlencode(self.query))
 
         return search_url
 
@@ -119,15 +144,32 @@ class GetSearchInfo:
         if _parser.root is None:
             return result
 
-        links = _parser.root.findall('.//div[@class="PartialSearchResults-item-title"]//a')
+        links = _parser.root.findall('.//li//a[@class="result-link"]')
 
         for link in links:
-            _class = link.get('class')
             _href = link.get('href')
-            if _class and re.search(r'result-link', _class, re.I):
-                valid_url = validate_url(_href)
+            _urlparse = urlparse(_href)
+            if _urlparse:
+                _query = _urlparse.query
+                if not _query:
+                    continue
+
+                _parse_qs = parse_qs(_query)
+                if not isinstance(_parse_qs, dict):
+                    continue
+
+                # noinspection PyTypeChecker
+                urls = _parse_qs.get('as')
+                if not isinstance(urls, (list, tuple)):
+                    continue
+
+                valid_url = validate_url(urls[0])
                 if valid_url:
-                    valid_url = re.sub(r'\?utm_content=.+$', '', valid_url)
+                    if '..' in valid_url:
+                        p = split_url(valid_url, allow_fragments=False)
+                        if p.get('url'):
+                            valid_url = '%s://%s' % (p.get('scheme'), p.get('domain'))
+
                     result.append(valid_url)
 
         if result:
@@ -147,11 +189,16 @@ class GetSearchInfo:
         if _parser.root is None:
             return next_page
 
-        find_next_page = _parser.root.find('.//li[@class="PartialWebPagination-next"]//a')
-        if find_next_page is not None:
-            _href = find_next_page.get('href')
-            if _href:
-                next_page = validate_url(urljoin(self.base_url, _href))
+        page_items = _parser.root.find('.//ul[@class="pagination"]')
+        if not page_items:
+            return next_page
+
+        links = page_items.findall('li//a')
+        for link in links:
+            _href = link.get('href')
+            _title = link.get('title')
+            if re.search(r'next', _title, re.I):
+                next_page = validate_url(urljoin(self.search_url, _href))
 
         return next_page
 
@@ -174,8 +221,8 @@ if __name__ == '__main__':
                             action='store_true')
         parser.add_argument('-o', '--output',
                             dest='output_file',
-                            help='Output results (default getsearchinfo_results.txt)',
-                            default='getsearchinfo_results.txt',
+                            help='Output results (default lycos_results.txt)',
+                            default='lycos_results.txt',
                             action='store')
 
         args = parser.parse_args()
@@ -183,7 +230,7 @@ if __name__ == '__main__':
             parser.print_help()
             sys.exit('[!] Keyword required')
 
-        eng = GetSearchInfo()
+        eng = Lycos()
         res = eng.search(args.keyword)
 
         if args.save_output:

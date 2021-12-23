@@ -1,28 +1,31 @@
 import re
+from logging import DEBUG
 from urllib.parse import urljoin, urlencode
-from blacklist import is_blacklisted
-from helper import fetch_url, setup_logger, validate_url
-from html_parser import NativeHTMLParser
-from config import LOG_LEVEL
+from utils.blacklist import is_blacklisted
+from utils.helper import setup_logger, validate_url
+from libs.html_parser import NativeHTMLParser
+from libs.fetch import FetchRequest
+
+logger = setup_logger(name='GetSearchInfo')
 
 
-logger = setup_logger(name='Seznam', level=LOG_LEVEL)
+class GetSearchInfo:
+    base_url = 'https://www.getsearchinfo.com'
 
-
-class Seznam:
-    base_url = 'https://www.seznam.cz'
-    search_url = 'https://search.seznam.cz'
-
-    def __init__(self):
+    def __init__(self, debug=False):
+        self.debug = debug
+        self.fetch = FetchRequest()
         self.query = {}
-        self.user_agent = None
         self.filtering = True
+
+        if self.debug:
+            logger.setLevel(DEBUG)
 
     def search(self, keyword):
         self.query.update({'q': str(keyword)})
         search_url = self.build_query()
         if search_url:
-            search_url = urljoin(self.search_url, search_url)
+            search_url = urljoin(self.base_url, search_url)
 
         return self.search_run(search_url)
 
@@ -32,32 +35,48 @@ class Seznam:
             return result
 
         duplicate_page = 0
+        empty_page = 0
         headers = {'Referer': self.base_url}
         page = 1
         while True:
-            logger.info('Page: %d' % page)
-            html = fetch_url(url, headers=headers)
+            if self.debug:
+                logger.debug('Page: %s %s' % (page, url))
+            else:
+                logger.info('Page: %s' % page)
+
+            html = self.fetch.get(url, headers=headers)
             links = self.get_links(html)
 
-            if links:
+            if not links:
+                empty_page += 1
+                if page > 1:
+                    break
+            else:
                 duplicate = True
                 for link in links:
                     if self.filtering:
                         if is_blacklisted(link):
+                            logger.debug('[BLACKLIST] %s' % link)
                             continue
 
                     if link not in result:
                         duplicate = False
                         logger.info(link)
                         result.append(link)
+                    else:
+                        logger.debug('[EXIST] %s' % link)
+
                 if duplicate:
                     duplicate_page += 1
 
             if duplicate_page >= 3:
                 break
 
+            if empty_page >= 2:
+                break
+
             next_page = self.get_next_page(html)
-            if next_page:
+            if next_page and next_page != url:
                 headers.update({'Referer': url})
                 url = next_page
             else:
@@ -65,28 +84,27 @@ class Seznam:
             page += 1
 
         result = list(dict.fromkeys(result))
-        logger.info('Total links: %s' % len(result))
+        logger.info('Total links: %d' % len(result))
 
         return result
 
     def build_query(self, html=None):
         search_url = ''
         if not html:
-            html = fetch_url(self.base_url, delete_cookie=True)
+            html = self.fetch.get(self.base_url)
 
         _parser = NativeHTMLParser()
-        _parser.feed(html)
+        _parser.feed(str(html))
         _parser.close()
 
         if _parser.root is None:
             return search_url
 
-        form_search = _parser.root.find('.//form[@class="sticky-header-search__form"]')
+        form_header = _parser.root.find('.//form[@name="searchform-top"]')
 
-        if form_search:
-            search_url = form_search.get('action')
-            inputs = form_search.findall('.//input[@type="hidden"]')
-
+        if form_header:
+            search_url = form_header.get('action')
+            inputs = form_header.findall('.//input[@type="hidden"]')
             for inp in inputs:
                 _name = inp.get('name')
                 _value = inp.get('value')
@@ -108,23 +126,22 @@ class Seznam:
             return result
 
         _parser = NativeHTMLParser()
-        _parser.feed(html)
+        _parser.feed(str(html))
         _parser.close()
 
         if _parser.root is None:
             return result
 
-        search_result = _parser.root.find('.//div[@data-dot="results"]')
-        if not search_result:
-            return result
-
-        links = search_result.findall('.//a[@data-l-id]')
+        links = _parser.root.findall('.//div[@class="PartialSearchResults-item-title"]//a')
 
         for link in links:
+            _class = link.get('class')
             _href = link.get('href')
-            valid_url = validate_url(_href)
-            if valid_url:
-                result.append(valid_url)
+            if _class and re.search(r'result-link', _class, re.I):
+                valid_url = validate_url(_href)
+                if valid_url:
+                    valid_url = re.sub(r'\?utm_content=.+$', '', valid_url)
+                    result.append(valid_url)
 
         if result:
             result = list(dict.fromkeys(result))
@@ -137,24 +154,17 @@ class Seznam:
             return next_page
 
         _parser = NativeHTMLParser()
-        _parser.feed(html)
+        _parser.feed(str(html))
         _parser.close()
 
         if _parser.root is None:
             return next_page
 
-        page_items = _parser.root.find('.//ul[@id="paging"]')
-        if not page_items:
-            return next_page
-
-        list_element = page_items.findall('li')
-        for li in list_element:
-            _class = li.get('class')
-            if _class and re.search(r'Paging-item--next', _class, re.I):
-                _href = li.find('a').get('href')
-                next_page = validate_url(urljoin(self.search_url, _href))
-                if next_page:
-                    break
+        find_next_page = _parser.root.find('.//li[@class="PartialWebPagination-next"]//a')
+        if find_next_page is not None:
+            _href = find_next_page.get('href')
+            if _href:
+                next_page = validate_url(urljoin(self.base_url, _href))
 
         return next_page
 
@@ -177,8 +187,8 @@ if __name__ == '__main__':
                             action='store_true')
         parser.add_argument('-o', '--output',
                             dest='output_file',
-                            help='Output results (default seznam_results.txt)',
-                            default='seznam_results.txt',
+                            help='Output results (default getsearchinfo_results.txt)',
+                            default='getsearchinfo_results.txt',
                             action='store')
 
         args = parser.parse_args()
@@ -186,7 +196,7 @@ if __name__ == '__main__':
             parser.print_help()
             sys.exit('[!] Keyword required')
 
-        eng = Seznam()
+        eng = GetSearchInfo()
         res = eng.search(args.keyword)
 
         if args.save_output:

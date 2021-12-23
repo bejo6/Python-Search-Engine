@@ -1,26 +1,29 @@
 import re
+from logging import DEBUG
 from urllib.parse import urljoin, urlencode
-from blacklist import is_blacklisted
-from helper import fetch_url, setup_logger, validate_url
-from html_parser import NativeHTMLParser
-from config import LOG_LEVEL
+from utils.blacklist import is_blacklisted
+from utils.helper import setup_logger, validate_url
+from libs.html_parser import NativeHTMLParser
+from libs.fetch import FetchRequest
 
-
-logger = setup_logger(name='Gigablast', level=LOG_LEVEL)
+logger = setup_logger(name='Gigablast')
 
 
 class Gigablast:
     base_url = 'https://www.gigablast.com'
 
-    def __init__(self):
+    def __init__(self, debug=False):
+        self.debug = debug
+        self.fetch = FetchRequest()
         self.query = {}
-        self.user_agent = None
-        self.referer = self.base_url
         self.filtering = True
+
+        if self.debug:
+            logger.setLevel(DEBUG)
 
     def search(self, keyword):
         self.query.update({'q': str(keyword)})
-        search_url = self.build_first_query(keyword=str(keyword))
+        search_url = self.build_query(keyword=str(keyword))
         if search_url:
             search_url = urljoin(self.base_url, search_url)
 
@@ -32,29 +35,45 @@ class Gigablast:
             return result
 
         duplicate_page = 0
+        empty_page = 0
         headers = {'Referer': self.base_url}
         page = 1
         while True:
-            logger.info('Page: %d %s' % (page, url))
-            html = fetch_url(url, headers=headers)
+            if self.debug:
+                logger.debug('Page: %s %s' % (page, url))
+            else:
+                logger.info('Page: %s' % page)
+
+            html = self.fetch.get(url, headers=headers)
             html_link = self.get_html_link(html, url)
             links = self.get_links(html_link)
 
-            if links:
+            if not links:
+                empty_page += 1
+                if page > 1:
+                    break
+            else:
                 duplicate = True
                 for link in links:
                     if self.filtering:
                         if is_blacklisted(link):
+                            logger.debug('[BLACKLIST] %s' % link)
                             continue
 
                     if link not in result:
                         duplicate = False
                         logger.info(link)
                         result.append(link)
+                    else:
+                        logger.debug('[EXIST] %s' % link)
+
                 if duplicate:
                     duplicate_page += 1
 
             if duplicate_page >= 3:
+                break
+
+            if empty_page >= 2:
                 break
 
             next_page = self.get_next_page(html_link)
@@ -70,9 +89,9 @@ class Gigablast:
 
         return result
 
-    def build_first_query(self, keyword):
+    def build_query(self, keyword):
         search_url = ''
-        html = fetch_url(self.base_url, delete_cookie=True)
+        html = self.fetch.get(self.base_url)
 
         _parser = NativeHTMLParser()
         _parser.feed(str(html))
@@ -104,43 +123,6 @@ class Gigablast:
 
         if search_url:
             search_url = '%s?%s' % (search_url, urlencode(query))
-
-        return search_url
-
-    def build_query(self, keyword, html=None):
-        search_url = ''
-        if not html:
-            html = fetch_url(self.base_url, delete_cookie=True)
-
-        _parser = NativeHTMLParser()
-        _parser.feed(str(html))
-        _parser.close()
-
-        if _parser.root is None:
-            return search_url
-
-        form_search = _parser.root.find('.//form[@action="/web"]')
-
-        if form_search:
-            action = form_search.get('action')
-            if action:
-                search_url = urljoin(self.base_url, action)
-
-            inputs = form_search.findall('.//input[@type="hidden"]')
-            for inp in inputs:
-                _name = inp.get('name')
-                _value = inp.get('value')
-
-                if not _name:
-                    continue
-
-                if _name != 'q':
-                    self.query.update({_name: _value or ''})
-                else:
-                    self.query.update({_name: keyword})
-
-        if search_url:
-            search_url = '%s?%s' % (search_url, urlencode(self.query))
 
         return search_url
 
@@ -187,7 +169,7 @@ class Gigablast:
                     search_link = urljoin(self.base_url, search_path)
 
         if search_link:
-            html = fetch_url(search_link, headers={'Referer': referer})
+            html = self.fetch.get(search_link, headers={'Referer': referer})
         return html
 
     def get_next_page(self, html, recheck=False):

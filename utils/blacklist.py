@@ -1,7 +1,7 @@
 import re
-from urllib.parse import urlparse
-from static import domain_tlds
-from helper import split_url
+from utils.static import domain_tlds
+from utils.helper import split_url
+
 
 DOMAIN_COMPANY_NAME = [
     'google',
@@ -46,7 +46,7 @@ def is_blacklisted(url):
         if re.search(rdomain, domain, re.I):
             return True
 
-        dcompany = '(%s)(\\.co|go)?\\.(%s)' % ('|'.join(DOMAIN_COMPANY_NAME), '|'.join(domain_tlds))
+        dcompany = '(%s)(\\.com?|go)?\\.(%s)' % ('|'.join(DOMAIN_COMPANY_NAME), '|'.join(domain_tlds))
         rcompany = r'^(.*\.)?%s$' % dcompany
         if re.search(rcompany, domain, re.I):
             return True

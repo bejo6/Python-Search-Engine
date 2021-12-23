@@ -1,13 +1,8 @@
-import gzip
-import json
 import os
 import re
-import hashlib
-import logging
 import random
-import http.cookiejar
-from urllib.request import Request, HTTPCookieProcessor, build_opener, urlopen, OpenerDirector
-from static import list_charset, domain_tlds, user_agent_list
+import logging
+from utils.static import list_charset, domain_tlds, user_agent_list
 
 
 def setup_logger(name=None, level='info'):
@@ -38,6 +33,58 @@ def setup_logger(name=None, level='info'):
     return logger
 
 
+def full_path(p):
+    return os.path.abspath(p)
+
+
+def path_exist(p):
+    return os.path.exists(p)
+
+
+def file_exist(f):
+    if path_exist(f) and os.path.isfile(f):
+        return True
+    return False
+
+
+def dir_exist(d):
+    if path_exist(d) and os.path.isdir(d):
+        return True
+    return False
+
+
+def validate_path(path, isdir=False):
+    fpath = full_path(path)
+    if isdir:
+        directory_name = fpath
+    else:
+        directory_name = os.path.dirname(fpath)
+
+    if file_exist(directory_name):
+        try:
+            os.remove(directory_name)
+        except os.error as e:
+            print(e)
+            print('Failed to delete file %s' % directory_name)
+            return
+
+    if not path_exist(directory_name):
+        try:
+            os.makedirs(directory_name)
+        except os.error as e:
+            print(e)
+            print('Failed to create directory %s' % directory_name)
+            return
+
+    if dir_exist(directory_name):
+        if isdir:
+            return os.path.abspath(directory_name)
+        else:
+            return fpath
+
+    return
+
+
 def decode_bytes(val):
     decoded = ''
     charset = ''
@@ -58,129 +105,6 @@ def decode_bytes(val):
     charset = 'utf-8'
     decoded = val.decode(charset, 'replace')
     return decoded, charset
-
-
-def cookie_file(url, cookie_dir='cookie', ext='_cookie'):
-    _cookieFile = ''
-    _cookieStr = hashlib.md5('_cookieStr'.encode()).hexdigest()
-
-    spliturl = split_url(url)
-    if spliturl.get('url'):
-        _cookieStr = '%s%s' % (spliturl.get('scheme'), spliturl.get('domain'))
-
-    _cookieName = hashlib.md5(_cookieStr.encode()).hexdigest()
-    _cookieFile = '%s%s' % (_cookieName, ext)
-
-    if os.path.exists(cookie_dir):
-        if os.path.isfile(cookie_dir):
-            os.remove(cookie_dir)
-            os.mkdir(cookie_dir)
-    else:
-        os.mkdir(cookie_dir)
-
-    cookie_path = os.path.join(cookie_dir, _cookieFile)
-
-    return cookie_path
-
-
-def fetch_url(url, delete_cookie=False, headers=None, data=None, method=None):
-    _result = ''
-    _response = None
-    _userAgent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:91.0) Gecko/20100101 Firefox/91.0'
-    # _userAgent = random.choice(user_agent_list)
-
-    if isinstance(data, dict):
-        _data = str(json.dumps(data)).encode('utf-8')
-        _request = Request(url, data=_data)
-    else:
-        _request = Request(url)
-
-    methods = ['GET', 'HEAD', 'POST', 'PUT', 'DELETE', 'CONNECT', 'OPTIONS', 'TRACE', 'PATCH']
-    if method and str(method).upper() in methods:
-        _request.method = method.upper()
-
-    _request.add_header('User-Agent', _userAgent)
-
-    if isinstance(headers, dict):
-        for key in headers:
-            header_value = headers.get(key)
-            _request.add_header(key, header_value)
-
-    _cookieFile = cookie_file(url)
-    if _cookieFile:
-        if delete_cookie:
-            if os.path.exists(_cookieFile) and os.path.isfile(_cookieFile):
-                os.remove(_cookieFile)
-
-        if os.path.exists(_cookieFile) and os.path.isfile(_cookieFile):
-            cookie = http.cookiejar.MozillaCookieJar()
-            cookie.load(_cookieFile, ignore_discard=True, ignore_expires=True)
-        else:
-            cookie = http.cookiejar.MozillaCookieJar(_cookieFile)
-
-        handler = HTTPCookieProcessor(cookie)
-        opener = build_opener(handler)
-        _response = fetch_open(_request, opener=opener, cookie=cookie, cookie_path=_cookieFile)
-
-    else:
-        _response = fetch_open(_request)
-
-    if _response:
-        try:
-            content_encoding = _response.getheader('Content-Encoding')
-            if content_encoding and content_encoding.lower() == 'gzip':
-                _result, _ = decode_bytes(gzip.decompress(_response.read()))
-            else:
-                _result, _ = decode_bytes(_response.read())
-        except Exception as err:
-            print('_response error', err)
-
-    return _result
-
-
-def simple_fetch(url, data=None):
-    _result = ''
-
-    _data = None
-    if isinstance(data, dict):
-        _data = str(json.dumps(data)).encode('utf-8', errors='replace')
-
-    _response = urlopen(url=url, data=_data, timeout=10)
-    if _response:
-        try:
-            content_encoding = _response.getheader('Content-Encoding')
-            if content_encoding and content_encoding.lower() == 'gzip':
-                _result, _ = decode_bytes(gzip.decompress(_response.read()))
-            else:
-                _result, _ = decode_bytes(_response.read())
-        except Exception as err:
-            print('_response error', err)
-
-    return _result
-
-
-def fetch_open(req, opener=None, cookie=None, cookie_path=None, debug=True):
-    _result = None
-
-    if isinstance(opener, OpenerDirector):
-        try:
-            _result = opener.open(req, timeout=10)
-            if cookie is not None and cookie_path is not None:
-                try:
-                    cookie.save(cookie_path, ignore_discard=True, ignore_expires=True)
-                except Exception as err:
-                    print('Exception cookie.save err:', err)
-        except Exception as err:
-            if debug:
-                print('Exception OpenerDirector err', err)
-    else:
-        try:
-            _result = urlopen(req, timeout=10)
-        except Exception as err:
-            if debug:
-                print('Exception urlopen err', err)
-
-    return _result
 
 
 def validate_url(url=None, allow_fragments=False):
@@ -367,3 +291,7 @@ def unescape_url(url):
             pass
 
     return url
+
+
+def random_agent():
+    return random.choice(user_agent_list)

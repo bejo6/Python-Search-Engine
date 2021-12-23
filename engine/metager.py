@@ -1,23 +1,27 @@
 import re
 import base64
+from logging import DEBUG
 from urllib.parse import urljoin, urlencode, urlparse, unquote, parse_qs
-from blacklist import is_blacklisted
-from helper import fetch_url, setup_logger, decode_bytes, validate_url
-from html_parser import NativeHTMLParser
-from config import LOG_LEVEL
+from utils.blacklist import is_blacklisted
+from utils.helper import setup_logger, validate_url, decode_bytes, split_url
+from libs.html_parser import NativeHTMLParser
+from libs.fetch import FetchRequest
 
-
-logger = setup_logger(name='metaGer', level=LOG_LEVEL)
+logger = setup_logger(name='MetaGer')
 
 
 class MetaGer:
     base_url = 'https://metager.org'
     next_page = ''
 
-    def __init__(self):
+    def __init__(self, debug=False):
+        self.debug = debug
+        self.fetch = FetchRequest()
         self.query = {}
-        self.user_agent = None
         self.filtering = True
+
+        if self.debug:
+            logger.setLevel(DEBUG)
 
     def search(self, keyword):
         search_url = self.build_query(keyword=keyword)
@@ -29,32 +33,48 @@ class MetaGer:
             return result
 
         duplicate_page = 0
-        referrer = self.base_url
+        empty_page = 0
+        headers = {'Referer': self.base_url}
         page = 1
         while True:
-            logger.info('Page: %d %s' % (page, url))
-            html = fetch_url(url, headers={'Referer': referrer})
+            if self.debug:
+                logger.debug('Page: %s %s' % (page, url))
+            else:
+                logger.info('Page: %s' % page)
+
+            html = self.fetch.get(url, headers=headers)
             links = self.get_links(html)
 
-            if links:
+            if not links:
+                empty_page += 1
+                if page > 1:
+                    break
+            else:
                 duplicate = True
                 for link in links:
                     if self.filtering:
                         if is_blacklisted(link):
+                            logger.debug('[BLACKLIST] %s' % link)
                             continue
 
                     if link not in result:
                         duplicate = False
                         logger.info(link)
                         result.append(link)
+                    else:
+                        logger.debug('[EXIST] %s' % link)
+
                 if duplicate:
                     duplicate_page += 1
 
             if duplicate_page >= 3:
                 break
 
+            if empty_page >= 2:
+                break
+
             if self.next_page and self.next_page != url:
-                referrer = url
+                headers.update({'Referer': url})
                 url = self.next_page
             else:
                 break
@@ -68,7 +88,7 @@ class MetaGer:
     def build_query(self, keyword, html=None):
         search_url = ''
         if not html:
-            html = fetch_url(self.base_url, delete_cookie=True)
+            html = self.fetch.get(self.base_url)
 
         _parser = NativeHTMLParser()
         _parser.feed(str(html))
@@ -121,7 +141,7 @@ class MetaGer:
             iframe_src = iframe.get('src')
             iframe_url = validate_url(iframe_src)
             if iframe_url:
-                iframe_html = fetch_url(iframe_url)
+                iframe_html = self.fetch.get(iframe_url)
                 return self.get_links(iframe_html)
 
         for link in links:
@@ -184,8 +204,9 @@ class MetaGer:
         first_url = validate_url(urls[0])
         if first_url:
             if '..' in first_url:
-                p = urlparse(url)
-                first_url = '%s://%s' % (p.scheme, p.netloc)
+                p = split_url(url)
+                if p.get('url'):
+                    first_url = '%s://%s' % (p.get('scheme'), p.get('domain'))
 
             _url = first_url
 

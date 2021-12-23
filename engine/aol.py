@@ -1,25 +1,33 @@
 import re
-from urllib.parse import urljoin, urlencode, urlparse, parse_qs
-from blacklist import is_blacklisted
-from helper import fetch_url, setup_logger, validate_url, split_url
-from html_parser import NativeHTMLParser
-from config import LOG_LEVEL
+from logging import DEBUG
+from urllib.parse import urljoin, urlencode, unquote
+from utils.blacklist import is_blacklisted
+from utils.helper import setup_logger, validate_url
+from libs.html_parser import NativeHTMLParser
+from libs.fetch import FetchRequest
+
+logger = setup_logger(name='Aol')
 
 
-logger = setup_logger(name='Lycos', level=LOG_LEVEL)
+class Aol:
+    base_url = 'https://www.aol.com'
+    search_url = 'https://search.aol.com'
 
-
-class Lycos:
-    base_url = 'https://www.lycos.com'
-    search_url = 'https://search.lycos.com/web'
-
-    def __init__(self):
+    def __init__(self, debug=False):
+        self.debug = debug
         self.query = {}
-        self.user_agent = None
+        self.fetch = FetchRequest()
         self.filtering = True
 
+        if self.debug:
+            logger.setLevel(DEBUG)
+
     def search(self, keyword):
-        search_url = self.build_query(keyword=str(keyword))
+        self.query.update({'q': str(keyword)})
+        search_url = self.build_query()
+        if search_url:
+            search_url = urljoin(self.search_url, search_url)
+
         return self.search_run(search_url)
 
     def search_run(self, url):
@@ -28,33 +36,49 @@ class Lycos:
             return result
 
         duplicate_page = 0
-        referrer = self.base_url
+        empty_page = 0
+        headers = {'Referer': self.base_url}
         page = 1
         while True:
-            logger.info('Page: %d' % page)
-            html = fetch_url(url, headers={'Referer': referrer})
+            if self.debug:
+                logger.debug('Page: %s %s' % (page, url))
+            else:
+                logger.info('Page: %s' % page)
+
+            html = self.fetch.get(url=url, headers=headers)
             links = self.get_links(html)
 
-            if links:
+            if not links:
+                empty_page += 1
+                if page > 1:
+                    break
+            else:
                 duplicate = True
                 for link in links:
                     if self.filtering:
                         if is_blacklisted(link):
+                            logger.debug('[BLACKLIST] %s' % link)
                             continue
 
                     if link not in result:
                         duplicate = False
-                        logger.info(link)
                         result.append(link)
+                        logger.info(link)
+                    else:
+                        logger.debug('[EXIST] %s' % link)
+
                 if duplicate:
                     duplicate_page += 1
 
             if duplicate_page >= 3:
                 break
 
+            if empty_page >= 2:
+                break
+
             next_page = self.get_next_page(html)
             if next_page and next_page != url:
-                referrer = url
+                headers.update({'Referer': url})
                 url = next_page
             else:
                 break
@@ -65,21 +89,10 @@ class Lycos:
 
         return result
 
-    def build_query(self, keyword, html=None):
+    def build_query(self, html=None):
         search_url = ''
         if not html:
-            html = fetch_url(self.base_url, delete_cookie=True)
-
-        patern_keyvol = r'\#keyvol[.)"\'\s]+val[("\'\s]+([a-f0-9]+)[)"\'\s]+;'
-        match_keyvol = re.search(patern_keyvol, str(html), re.I)
-        if match_keyvol:
-            try:
-                self.query.update({
-                    'q': keyword,
-                    'keyvol': match_keyvol.group(1)
-                })
-            except IndexError:
-                pass
+            html = self.fetch.get(self.base_url)
 
         _parser = NativeHTMLParser()
         _parser.feed(str(html))
@@ -88,26 +101,22 @@ class Lycos:
         if _parser.root is None:
             return search_url
 
-        form_search = _parser.root.find('.//form[@id="form_query"]')
+        form_header = _parser.root.find('.//form[@id="header-form"]')
 
-        if form_search:
-            search_url = form_search.get('action')
-            _input = form_search.find('.//input[@id="keyvol"]')
-            if _input:
-                _name = _input.get('name')
-                _value = _input.get('value')
-                if _name == 'keyvol':
-                    if 'keyvol' not in self.query:
-                        self.query.update({
-                            'q': keyword,
-                            'keyvol': _value
-                        })
+        if form_header:
+            search_url = form_header.get('action')
+            inputs = form_header.findall('.//input[@type="hidden"]')
+            for inp in inputs:
+                _name = inp.get('name')
+                _value = inp.get('value')
+                if not _name:
+                    continue
 
-        if search_url and self.query:
-            self.search_url = search_url
+                if _name != 'q':
+                    self.query.update({_name: _value or ''})
+
+        if search_url:
             search_url = '%s?%s' % (search_url, urlencode(self.query))
-        elif self.query:
-            search_url = '%s?%s' % (self.search_url, urlencode(self.query))
 
         return search_url
 
@@ -117,6 +126,8 @@ class Lycos:
         if not html:
             return result
 
+        patern_url = r'\/RU=(.*?)\/RK='
+
         _parser = NativeHTMLParser()
         _parser.feed(str(html))
         _parser.close()
@@ -124,33 +135,21 @@ class Lycos:
         if _parser.root is None:
             return result
 
-        links = _parser.root.findall('.//li//a[@class="result-link"]')
+        links = _parser.root.findall('.//a[@referrerpolicy="origin"]')
 
         for link in links:
+            _class = link.get('class')
             _href = link.get('href')
-            _urlparse = urlparse(_href)
-            if _urlparse:
-                _query = _urlparse.query
-                if not _query:
-                    continue
-
-                _parse_qs = parse_qs(_query)
-                if not isinstance(_parse_qs, dict):
-                    continue
-
-                # noinspection PyTypeChecker
-                urls = _parse_qs.get('as')
-                if not isinstance(urls, (list, tuple)):
-                    continue
-
-                valid_url = validate_url(urls[0])
-                if valid_url:
-                    if '..' in valid_url:
-                        p = split_url(valid_url, allow_fragments=False)
-                        if p.get('url'):
-                            valid_url = '%s://%s' % (p.get('scheme'), p.get('domain'))
-
-                    result.append(valid_url)
+            if _class and re.search(r'ac-algo', _class, re.I):
+                temp_url = _href
+                web_url = re.search(patern_url, temp_url, re.I)
+                if web_url:
+                    try:
+                        valid_url = validate_url(unquote(web_url.group(1)))
+                        if valid_url:
+                            result.append(valid_url)
+                    except IndexError:
+                        pass
 
         if result:
             result = list(dict.fromkeys(result))
@@ -169,15 +168,10 @@ class Lycos:
         if _parser.root is None:
             return next_page
 
-        page_items = _parser.root.find('.//ul[@class="pagination"]')
-        if not page_items:
-            return next_page
-
-        links = page_items.findall('li//a')
-        for link in links:
-            _href = link.get('href')
-            _title = link.get('title')
-            if re.search(r'next', _title, re.I):
+        find_next_page = _parser.root.find('.//a[@class="next"]')
+        if find_next_page is not None:
+            _href = find_next_page.get('href')
+            if _href:
                 next_page = validate_url(urljoin(self.search_url, _href))
 
         return next_page
@@ -201,8 +195,8 @@ if __name__ == '__main__':
                             action='store_true')
         parser.add_argument('-o', '--output',
                             dest='output_file',
-                            help='Output results (default lycos_results.txt)',
-                            default='lycos_results.txt',
+                            help='Output results (default aol_results.txt)',
+                            default='aol_results.txt',
                             action='store')
 
         args = parser.parse_args()
@@ -210,7 +204,7 @@ if __name__ == '__main__':
             parser.print_help()
             sys.exit('[!] Keyword required')
 
-        eng = Lycos()
+        eng = Aol()
         res = eng.search(args.keyword)
 
         if args.save_output:

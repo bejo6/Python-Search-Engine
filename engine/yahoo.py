@@ -1,19 +1,24 @@
 import re
+from logging import DEBUG
 from urllib.parse import urljoin, urlencode, unquote
-from helper import fetch_url, validate_url, setup_logger
-from blacklist import is_blacklisted
-from config import LOG_LEVEL
+from utils.blacklist import is_blacklisted
+from utils.helper import setup_logger, validate_url
+from libs.fetch import FetchRequest
 
-
-logger = setup_logger(name='Yahoo', level=LOG_LEVEL)
+logger = setup_logger(name='Yahoo')
 
 
 class Yahoo:
     base_url = 'https://search.yahoo.com'
 
-    def __init__(self):
+    def __init__(self, debug=False):
+        self.debug = debug
+        self.fetch = FetchRequest()
         self.query = {}
         self.filtering = True
+
+        if self.debug:
+            logger.setLevel(DEBUG)
 
     def search(self, keyword: str) -> list:
         self.query.update({'p': keyword})
@@ -29,33 +34,49 @@ class Yahoo:
             return result
 
         duplicate_page = 0
-        referrer = self.base_url
+        empty_page = 0
+        headers = {'Referer': self.base_url}
         page = 1
         while True:
-            logger.info('Page: %d' % page)
-            html = fetch_url(url, headers={'Referer': referrer})
+            if self.debug:
+                logger.debug('Page: %s %s' % (page, url))
+            else:
+                logger.info('Page: %s' % page)
+
+            html = self.fetch.get(url, headers=headers)
             links = self.get_links(html)
 
-            if links:
+            if not links:
+                empty_page += 1
+                if page > 1:
+                    break
+            else:
                 duplicate = True
                 for link in links:
                     if self.filtering:
                         if is_blacklisted(link):
+                            logger.debug('[BLACKLIST] %s' % link)
                             continue
 
                     if link not in result:
                         duplicate = False
                         logger.info(link)
                         result.append(link)
+                    else:
+                        logger.debug('[EXIST] %s' % link)
+
                 if duplicate:
                     duplicate_page += 1
 
             if duplicate_page >= 3:
                 break
 
+            if empty_page >= 2:
+                break
+
             next_page = self.get_next_page(html)
             if next_page:
-                referrer = url
+                headers.update({'Referer': url})
                 url = next_page
             else:
                 break
@@ -74,7 +95,7 @@ class Yahoo:
         patern_value = r'value[\s=]+((?:")(.*?)(?:")|(?:\')(.*?)(?:\'))'
 
         if not html:
-            html = fetch_url(self.base_url, delete_cookie=True)
+            html = self.fetch.get(self.base_url)
 
         search_url = ''
         if html:

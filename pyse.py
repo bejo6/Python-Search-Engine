@@ -2,23 +2,23 @@ import os
 import sys
 import argparse
 import threading
-from helper import setup_logger
-from config import LOG_LEVEL
-from bing import Bing
-from yahoo import Yahoo
-from google import Google
-from ask import Ask
-from aol import Aol
-from yandex import Yandex
-from naver import Naver
-from seznam import Seznam
-from lycos import Lycos
-from metager import MetaGer
-from mojeek import Mojeek
-from gigablast import Gigablast
-from getsearchinfo import GetSearchInfo
+from logging import DEBUG
+from utils.helper import setup_logger
+from engine.aol import Aol
+from engine.ask import Ask
+from engine.bing import Bing
+from engine.getsearchinfo import GetSearchInfo
+from engine.gigablast import Gigablast
+from engine.google import Google
+from engine.lycos import Lycos
+from engine.metager import MetaGer
+from engine.mojeek import Mojeek
+from engine.naver import Naver
+from engine.seznam import Seznam
+from engine.yahoo import Yahoo
+from engine.yandex import Yandex
 
-logger = setup_logger(level=LOG_LEVEL)
+logger = setup_logger()
 
 
 def save_links(links, filename='results.txt'):
@@ -34,14 +34,16 @@ def save_links(links, filename='results.txt'):
         if link not in current_links:
             with open(filename, 'a', encoding='utf-8', errors='replace') as f:
                 try:
-                    f.write(f'{link}\n')
+                    f.write('%s\n' % link)
                 except UnicodeEncodeError:
                     logger.error(link)
+                except Exception as err:
+                    logger.error(err)
 
             current_links.append(link)
 
 
-def engine_tasks(engine, keyword: str, output: str = None):
+def engine_tasks(engine, keyword, output=None):
     links = engine.search(keyword)
     if output:
         save_links(links, output)
@@ -49,23 +51,23 @@ def engine_tasks(engine, keyword: str, output: str = None):
         save_links(links)
 
 
-def engine_start(keyword: str, output: str = None):
+def engine_start(keyword, output=None, debug_mode=False):
     logger.info('Start search with keyword: %s' % keyword)
 
     engines = [
-        Bing(),
-        Yahoo(),
-        Google(),
-        Ask(),
-        Aol(),
-        Yandex(),
-        Naver(),
-        Seznam(),
-        Lycos(),
-        MetaGer(),
-        Mojeek(),
-        Gigablast(),
-        GetSearchInfo(),
+        Aol(debug=debug_mode),
+        Ask(debug=debug_mode),
+        Bing(debug=debug_mode),
+        GetSearchInfo(debug=debug_mode),
+        Gigablast(debug=debug_mode),
+        Google(debug=debug_mode),
+        Lycos(debug=debug_mode),
+        MetaGer(debug=debug_mode),
+        Mojeek(debug=debug_mode),
+        Naver(debug=debug_mode),
+        Seznam(debug=debug_mode),
+        Yahoo(debug=debug_mode),
+        Yandex(debug=debug_mode),
     ]
 
     threads = []
@@ -95,6 +97,10 @@ def main():
                         help='Output results (default results.txt)',
                         default='results.txt',
                         action='store')
+    parser.add_argument('-d', '--debug',
+                        dest='debug_mode',
+                        help='Set DEBUG mode)',
+                        action='store_true')
 
     args = parser.parse_args()
 
@@ -102,7 +108,10 @@ def main():
         parser.print_help()
         sys.exit()
 
-    engine_start(keyword=args.keyword, output=args.output_file)
+    if args.debug_mode:
+        logger.setLevel(DEBUG)
+
+    engine_start(keyword=args.keyword, output=args.output_file, debug_mode=args.debug_mode)
 
 
 if __name__ == '__main__':
