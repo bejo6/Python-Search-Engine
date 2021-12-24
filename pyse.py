@@ -99,7 +99,7 @@ def main():
                         action='store')
     parser.add_argument('-d', '--debug',
                         dest='debug_mode',
-                        help='Set DEBUG mode)',
+                        help='Set DEBUG mode',
                         action='store_true')
 
     args = parser.parse_args()
