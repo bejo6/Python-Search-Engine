@@ -4,7 +4,7 @@ import hashlib
 import http.cookiejar
 import urllib.request
 import urllib.parse
-from utils.helper import split_url, validate_path, file_exist, random_agent, decode_bytes
+from utils.helper import split_url, dir_exist, file_exist, random_agent, decode_bytes
 
 
 class FetchRequest:
@@ -27,8 +27,13 @@ class FetchRequest:
         cookieName = hashlib.md5(cookieStr.encode()).hexdigest()
         cookieFile = '%s%s' % (cookieName, self.cookie_ext)
 
-        if validate_path(self.cookie_dir):
-            self.cookie_file = os.path.join(self.cookie_dir, cookieFile)
+        if file_exist(self.cookie_dir):
+            os.remove(self.cookie_dir)
+
+        if not dir_exist(self.cookie_dir):
+            os.mkdir(self.cookie_dir)
+
+        self.cookie_file = os.path.join(self.cookie_dir, cookieFile)
 
     def get(self, url, headers=None):
         response = self.request(url=url, method='GET', headers=headers)
