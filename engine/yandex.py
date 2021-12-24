@@ -122,7 +122,7 @@ class Yandex:
 
         if search_url:
             self.query.update({'text': str(keyword)})
-            search_url = f'{search_url}?{urlencode(self.query)}'
+            search_url = '%s?%s' % (search_url, urlencode(self.query))
 
         return search_url
 
