@@ -92,6 +92,10 @@ def main():
                         dest='keyword',
                         help='Keyword to search',
                         action='store')
+    parser.add_argument('-l', '--list',
+                        dest='keyword_list',
+                        help='List keywords from file',
+                        action='store')
     parser.add_argument('-o', '--output',
                         dest='output_file',
                         help='Output results (default results.txt)',
@@ -104,14 +108,21 @@ def main():
 
     args = parser.parse_args()
 
-    if not args.keyword:
+    if not args.keyword and not args.keyword_list:
         parser.print_help()
         sys.exit()
 
     if args.debug_mode:
         logger.setLevel(DEBUG)
 
-    engine_start(keyword=args.keyword, output=args.output_file, debug_mode=args.debug_mode)
+    if args.keyword:
+        engine_start(keyword=args.keyword, output=args.output_file, debug_mode=args.debug_mode)
+    elif args.keyword_list:
+        if os.path.exists(args.keyword_list) and os.path.isfile(args.keyword_list):
+            with open(args.keyword_list, 'r') as fp:
+                lines = fp.read().splitlines()
+                for line in lines:
+                    engine_start(keyword=line, output=args.output_file, debug_mode=args.debug_mode)
 
 
 if __name__ == '__main__':
