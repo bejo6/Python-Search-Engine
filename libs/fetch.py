@@ -4,7 +4,41 @@ import hashlib
 import http.cookiejar
 import urllib.request
 import urllib.parse
+import threading
 from utils.helper import split_url, dir_exist, file_exist, random_agent, decode_bytes
+
+
+class ProxyManager:
+    def __init__(self, filepath):
+        self.filepath = filepath
+        self.proxies = []
+        self.index = 0
+        self.lock = threading.Lock()
+        self._load_proxies()
+
+    def _load_proxies(self):
+        if self.filepath and os.path.exists(self.filepath):
+            try:
+                with open(self.filepath, 'r') as f:
+                    self.proxies = [line.strip() for line in f if line.strip()]
+            except Exception as e:
+                print(f"[!] Error loading proxies: {e}")
+
+    def get_proxy(self):
+        if not self.proxies:
+            return None
+        with self.lock:
+            proxy = self.proxies[self.index]
+            self.index = (self.index + 1) % len(self.proxies)
+        return proxy
+
+
+_PROXY_MANAGER = None
+
+
+def setup_proxy_manager(filepath):
+    global _PROXY_MANAGER
+    _PROXY_MANAGER = ProxyManager(filepath)
 
 
 class FetchRequest:
@@ -60,7 +94,19 @@ class FetchRequest:
             cookie = http.cookiejar.MozillaCookieJar(self.cookie_file)
 
         handler = urllib.request.HTTPCookieProcessor(cookie)
-        opener = urllib.request.build_opener(handler)
+        handlers = [handler]
+
+        if _PROXY_MANAGER:
+            proxy = _PROXY_MANAGER.get_proxy()
+            if proxy:
+                proxy_handler = urllib.request.ProxyHandler({
+                    'http': proxy,
+                    'https': proxy
+                })
+                handlers.append(proxy_handler)
+
+        opener = urllib.request.build_opener(*handlers)
+        urllib.request.install_opener(opener)
         request = urllib.request.Request(url=url, method=method)
 
         if isinstance(headers, dict):

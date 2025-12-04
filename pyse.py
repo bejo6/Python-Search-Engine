@@ -3,6 +3,7 @@ import sys
 import argparse
 import threading
 from logging import DEBUG
+from libs.fetch import setup_proxy_manager
 from utils.helper import setup_logger
 from engine.aol import Aol
 from engine.ask import Ask
@@ -105,6 +106,10 @@ def main():
                         dest='debug_mode',
                         help='Set DEBUG mode',
                         action='store_true')
+    parser.add_argument('--proxy-file',
+                        dest='proxy_file',
+                        help='Load proxies from file',
+                        action='store')
 
     args = parser.parse_args()
 
@@ -114,6 +119,9 @@ def main():
 
     if args.debug_mode:
         logger.setLevel(DEBUG)
+
+    if args.proxy_file:
+        setup_proxy_manager(args.proxy_file)
 
     if args.keyword:
         engine_start(keyword=args.keyword, output=args.output_file, debug_mode=args.debug_mode)
