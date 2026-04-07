@@ -2,16 +2,16 @@ import re
 from logging import DEBUG
 from urllib.parse import urljoin, urlencode, urlparse, parse_qs
 from utils.blacklist import is_blacklisted
-from utils.helper import setup_logger, validate_url, split_url
+from utils.helper import setup_logger, validate_url
 from libs.html_parser import NativeHTMLParser
 from libs.fetch import FetchRequest
 
-logger = setup_logger(name='Lycos')
+logger = setup_logger(name='Ecosia')
 
 
-class Lycos:
-    base_url = 'https://www.lycos.com'
-    search_url = 'https://search.lycos.com/web'
+class Ecosia:
+    base_url = 'https://www.ecosia.org'
+    search_url = 'https://www.ecosia.org/search'
 
     def __init__(self, debug=False):
         self.debug = debug
@@ -23,7 +23,11 @@ class Lycos:
             logger.setLevel(DEBUG)
 
     def search(self, keyword):
+        self.query.update({'q': str(keyword), 'method': 'index'})
         search_url = self.build_query(keyword=str(keyword))
+        if search_url:
+            search_url = urljoin(self.base_url, search_url)
+
         return self.search_run(search_url)
 
     def search_run(self, url):
@@ -42,12 +46,6 @@ class Lycos:
                 logger.info('Page: %s' % page)
 
             html = self.fetch.get(url, headers=headers)
-            
-            # Check for no results page
-            if html and 'There were no results for your search query' in html:
-                logger.error('No results returned from Lycos')
-                break
-
             links = self.get_links(html)
 
             if not links:
@@ -79,7 +77,7 @@ class Lycos:
                 break
 
             next_page = self.get_next_page(html)
-            if next_page and next_page != url:
+            if next_page:
                 headers.update({'Referer': url})
                 url = next_page
             else:
@@ -93,47 +91,8 @@ class Lycos:
 
     def build_query(self, keyword, html=None):
         search_url = ''
-        if not html:
-            html = self.fetch.get(self.base_url)
-
-        patern_keyvol = r'\#keyvol[.)"\'\s]+val[("\'\s]+([a-f0-9]+)[)"\'\s]+;'
-        match_keyvol = re.search(patern_keyvol, str(html), re.I)
-        if match_keyvol:
-            try:
-                self.query.update({
-                    'q': keyword,
-                    'keyvol': match_keyvol.group(1)
-                })
-            except IndexError:
-                pass
-
-        _parser = NativeHTMLParser()
-        _parser.feed(str(html))
-        _parser.close()
-
-        if _parser.root is None:
-            return search_url
-
-        form_search = _parser.root.find('.//form[@id="form_query"]')
-
-        if form_search:
-            search_url = form_search.get('action')
-            _input = form_search.find('.//input[@id="keyvol"]')
-            if _input:
-                _name = _input.get('name')
-                _value = _input.get('value')
-                if _name == 'keyvol':
-                    if 'keyvol' not in self.query:
-                        self.query.update({
-                            'q': keyword,
-                            'keyvol': _value
-                        })
-
-        if search_url and self.query:
-            self.search_url = search_url
-            search_url = '%s?%s' % (search_url, urlencode(self.query))
-        elif self.query:
-            search_url = '%s?%s' % (self.search_url, urlencode(self.query))
+        self.query.update({'q': str(keyword), 'method': 'index'})
+        search_url = '%s?%s' % ('/search', urlencode(self.query))
 
         return search_url
 
@@ -150,51 +109,67 @@ class Lycos:
         if _parser.root is None:
             return result
 
-        # Updated pattern - Lycos now uses different structure
-        # Try legacy pattern first
-        links = _parser.root.findall('.//li//a[@class="result-link"]')
-        
-        if not links:
-            # Fallback: try any result links
-            links = _parser.root.findall('.//a[@class="result-link"]')
-        
-        if not links:
-            # Fallback: try to find search result containers
-            # Look for result blocks with href patterns
-            no_results = _parser.root.find('.//div[@class="no-results"]')
-            if no_results:
-                return result
-        
+        # Ecosia result links: class="result__link" or class="_2sFQ_"
+        links = _parser.root.findall('.//a[@class="result__link"]')
         for link in links:
             _href = link.get('href')
-            _urlparse = urlparse(_href)
-            if _urlparse:
-                _query = _urlparse.query
-                if not _query:
+            if _href and _href.startswith('/search/redirect?'):
+                # Ecosia uses redirect URLs, extract target
+                parsed = urlparse(_href)
+                params = parse_qs(parsed.query)
+                if 'url' in params:
+                    _href = params['url'][0]
+            valid_url = validate_url(_href)
+            if valid_url:
+                result.append(valid_url)
+
+        # Fallback: try generic result link patterns
+        if not result:
+            all_links = _parser.root.findall('.//a')
+            for link in all_links:
+                _class = link.get('class', '')
+                _href = link.get('href')
+                if not _href:
                     continue
 
-                _parse_qs = parse_qs(_query)
-                if not isinstance(_parse_qs, dict):
-                    continue
+                # Look for result-related classes
+                if any(x in _class for x in ['result', 'mainline', 'title', 'heading']):
+                    # Skip internal ecosia links
+                    if _href.startswith('http') and 'ecosia.org' not in _href:
+                        valid_url = validate_url(_href)
+                        if valid_url:
+                            result.append(valid_url)
+                    elif _href.startswith('/search/redirect'):
+                        parsed = urlparse(_href)
+                        params = parse_qs(parsed.query)
+                        if 'url' in params:
+                            valid_url = validate_url(params['url'][0])
+                            if valid_url:
+                                result.append(valid_url)
 
-                # noinspection PyTypeChecker
-                urls = _parse_qs.get('as')
-                if not isinstance(urls, (list, tuple)):
-                    continue
-
-                valid_url = validate_url(urls[0])
-                if valid_url:
-                    if '..' in valid_url:
-                        p = split_url(valid_url, allow_fragments=False)
-                        if p.get('url'):
-                            valid_url = '%s://%s' % (p.get('scheme'), p.get('domain'))
-
-                    result.append(valid_url)
+        # Final fallback: extract from __NEXT_DATA__ or embedded JSON
+        if not result:
+            result.extend(Ecosia._extract_from_json(html))
 
         if result:
             result = list(dict.fromkeys(result))
 
         return result
+
+    @staticmethod
+    def _extract_from_json(html):
+        """Extract result URLs from Ecosia embedded JSON data."""
+        links = []
+        try:
+            # Try to find result URLs in embedded JSON/script data
+            for m in re.finditer(r'"url"\s*:\s*"(https?://[^"]+)"', html):
+                url = m.group(1).replace('\\u0026', '&').replace('\\/', '/')
+                valid_url = validate_url(url)
+                if valid_url and 'ecosia.org' not in valid_url:
+                    links.append(valid_url)
+        except Exception:
+            pass
+        return links
 
     def get_next_page(self, html):
         next_page = ''
@@ -208,16 +183,33 @@ class Lycos:
         if _parser.root is None:
             return next_page
 
-        page_items = _parser.root.find('.//ul[@class="pagination"]')
-        if not page_items:
-            return next_page
+        # Look for pagination / "Next" button
+        pagination_links = _parser.root.findall('.//a')
+        for _link in pagination_links:
+            _href = _link.get('href')
+            _text = _link.text
+            if not _href:
+                continue
 
-        links = page_items.findall('li//a')
-        for link in links:
-            _href = link.get('href')
-            _title = link.get('title')
-            if re.search(r'next', _title, re.I):
-                next_page = validate_url(urljoin(self.search_url, _href))
+            if _text and re.search(r'next|more|further', _text, re.I):
+                next_page = validate_url(urljoin(self.base_url, _href))
+                if next_page:
+                    break
+
+        # Fallback: check for 'next' or 'page' parameter in embedded data
+        if not next_page:
+            match = re.search(r'"page"\s*:\s*(\d+)', html)
+            if match:
+                current_page = int(match.group(1))
+                next_page_num = current_page + 1
+                # Reconstruct URL with next page
+                parsed = urlparse('https://www.ecosia.org/search')
+                params = parse_qs(parsed.query)
+                params.update(self.query)
+                params['p'] = str(next_page_num)
+                next_page = '%s?%s' % ('/search', urlencode(params))
+                if next_page:
+                    next_page = validate_url(urljoin(self.base_url, next_page))
 
         return next_page
 
@@ -228,6 +220,7 @@ if __name__ == '__main__':
     import json
     try:
         parser = argparse.ArgumentParser(usage='%(prog)s [options]')
+        # noinspection PyProtectedMember
         parser._optionals.title = 'Options'
         parser.add_argument('-k', '--keyword',
                             dest='keyword',
@@ -239,8 +232,8 @@ if __name__ == '__main__':
                             action='store_true')
         parser.add_argument('-o', '--output',
                             dest='output_file',
-                            help='Output results (default lycos_results.txt)',
-                            default='lycos_results.txt',
+                            help='Output results (default ecosia_results.txt)',
+                            default='ecosia_results.txt',
                             action='store')
 
         args = parser.parse_args()
@@ -248,7 +241,7 @@ if __name__ == '__main__':
             parser.print_help()
             sys.exit('[!] Keyword required')
 
-        eng = Lycos()
+        eng = Ecosia()
         res = eng.search(args.keyword)
 
         if args.save_output:

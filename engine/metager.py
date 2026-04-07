@@ -97,7 +97,19 @@ class MetaGer:
         if _parser.root is None:
             return search_url
 
-        form_search = _parser.root.find('.//form[@id="searchForm"]')
+        # Try multiple form patterns (no contains() - stdlib ElementTree doesn't support it)
+        for xpath in ['.//form[@id="searchForm"]', './/form[@id="mainSearchForm"]']:
+            form_search = _parser.root.find(xpath)
+            if form_search:
+                break
+        
+        if not form_search:
+            # Try all forms and check action attribute manually
+            for form in _parser.root.findall('.//form'):
+                action = form.get('action', '')
+                if 'search' in action:
+                    form_search = form
+                    break
 
         if form_search:
             action = form_search.get('action')
@@ -112,13 +124,21 @@ class MetaGer:
                 if not _name:
                     continue
 
-                if _name != 'eingabe':
-                    self.query.update({_name: _value or ''})
-                else:
+                if _name in ('eingabe', 'q', 'query'):
                     self.query.update({_name: keyword})
+                else:
+                    self.query.update({_name: _value or ''})
+
+        if not search_url:
+            # Fallback: use direct search URL
+            search_url = 'https://metager.org/meta/meta.ger3'
+            self.query = {'eingabe': keyword}
 
         if search_url:
-            search_url = '%s?%s' % (search_url, urlencode(self.query))
+            if self.query:
+                search_url = '%s?%s' % (search_url, urlencode(self.query))
+            elif not search_url.startswith('http'):
+                search_url = urljoin(self.base_url, search_url)
 
         return search_url
 
@@ -134,8 +154,26 @@ class MetaGer:
         if _parser.root is None:
             return result
 
+        # Try legacy pattern first
         iframe = _parser.root.find('.//iframe[@id="mg-framed"]')
         links = _parser.root.findall('.//a[@class="result-link"]')
+
+        # New patterns for updated MetaGer (no contains() - stdlib ElementTree doesn't support it)
+        if not links:
+            links = []
+            for a in _parser.root.findall('.//a'):
+                cls = a.get('class', '')
+                if 'result' in cls:
+                    links.append(a)
+        if not links:
+            links = []
+            for div in _parser.root.findall('.//div'):
+                cls = div.get('class', '')
+                if 'result' in cls:
+                    links.extend(div.findall('.//a'))
+        if not links:
+            # Try to find any result URLs in the page
+            links = _parser.root.findall('.//a[@data-url]')
 
         if not links and iframe is not None:
             iframe_src = iframe.get('src')
@@ -148,8 +186,8 @@ class MetaGer:
             _href = link.get('href')
             url = validate_url(_href)
 
-            patern_metager = r'\/r\/metager\/'
-            patern_redirect = r'\/redir\/clickGate'
+            patern_metager = r'/r/metager/'
+            patern_redirect = r'/redir/clickGate'
             if re.search(patern_metager, url, re.I):
                 url = self.get_url_base64(url)
             elif re.search(patern_redirect, url, re.I):
@@ -167,13 +205,24 @@ class MetaGer:
 
     def get_next_page(self, root):
         self.next_page = ''
+        # Try legacy pattern
         next_search_link = root.find('.//div[@id="next-search-link"]')
         if next_search_link is None:
-            return
+            # Try alternative pagination patterns (no contains() - stdlib ElementTree)
+            for a in root.findall('.//a'):
+                cls = a.get('class', '')
+                if 'next' in cls:
+                    next_search_link = a
+                    break
+        if next_search_link is None:
+            next_search_link = root.find('.//a[@data-page="next"]')
 
-        _next = next_search_link.find('a')
-        if _next is not None:
-            _href = _next.get('href')
+        if next_search_link is not None:
+            if next_search_link.tag == 'a':
+                _href = next_search_link.get('href')
+            else:
+                _a = next_search_link.find('a')
+                _href = _a.get('href') if _a is not None else None
             if _href:
                 self.next_page = validate_url(urljoin(self.base_url, _href))
 
@@ -219,7 +268,6 @@ if __name__ == '__main__':
     import json
     try:
         parser = argparse.ArgumentParser(usage='%(prog)s [options]')
-        # noinspection PyProtectedMember
         parser._optionals.title = 'Options'
         parser.add_argument('-k', '--keyword',
                             dest='keyword',

@@ -146,14 +146,21 @@ class Bing:
         if not html:
             return result
 
-        patern_links = r'<(\s+)?(li|div)\s+class[\s=]+((?:")b_algo(?:")|(?:\')b_algo(?:\'))(\s+)?>(\s+)?<(\s+)?(h2|p)(\s+)?>(\s+)?<(\s+)?a\s+(.*?)>'
-        patern_href = r'href[\s=]+((?:")(.*?)(?:")|(?:\')(.*?)(?:\'))'
+        # Try b_algo pattern first (classic Bing layout)
+        patern_links = r'<(li|div)\s+class=["\']b_algo["\'].*?>'
+        patern_href = r'href=["\']([^"\']+)["\']'
 
         matches = re.findall(patern_links, str(html), re.M | re.I)
-        for match in matches:
-            href = re.search(patern_href, match[-1], re.I)
-            if href and len(href.groups()) >= 3:
-                valid_url = validate_url(href.group(3) or href.group(2))
+        # We need to find the anchors after b_algo elements - use the raw links fallback directly
+
+        # Fallback: extract all external links from h2/a patterns when b_algo is gone
+        # (Bing uses JS-rendered pages that may not include b_algo)
+        if not result:
+            raw_links = re.findall(
+                r'<a[^>]*href="(https?://(?!www\.bing\.|login\.live|account\.microsoft|privacy\.microsoft|aka\.ms|go\.microsoft|support\.microsoft|office\.com|onedrive\.live|microsoft365\.com|mmt\.akadns)[^"]+)"[^>]*>',
+                str(html), re.I)
+            for match in raw_links:
+                valid_url = validate_url(match[0])
                 if valid_url:
                     result.append(valid_url)
 

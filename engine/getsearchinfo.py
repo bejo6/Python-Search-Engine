@@ -1,6 +1,7 @@
 import re
 from logging import DEBUG
 from urllib.parse import urljoin, urlencode
+from html import unescape as unquote_html
 from utils.blacklist import is_blacklisted
 from utils.helper import setup_logger, validate_url
 from libs.html_parser import NativeHTMLParser
@@ -100,7 +101,12 @@ class GetSearchInfo:
         if _parser.root is None:
             return search_url
 
+        # Try legacy form first
         form_header = _parser.root.find('.//form[@name="searchform-top"]')
+        if not form_header:
+            form_header = _parser.root.find('.//form[@id="searchForm"]')
+        if not form_header:
+            form_header = _parser.root.find('.//form[@action="/web"]')
 
         if form_header:
             search_url = form_header.get('action')
@@ -113,6 +119,10 @@ class GetSearchInfo:
 
                 if _name != 'q':
                     self.query.update({_name: _value or ''})
+
+        if not search_url:
+            # Fallback: use /web endpoint directly
+            search_url = '/web'
 
         if search_url:
             search_url = '%s?%s' % (search_url, urlencode(self.query))
@@ -132,8 +142,9 @@ class GetSearchInfo:
         if _parser.root is None:
             return result
 
+        # Try legacy XPath pattern first
         links = _parser.root.findall('.//div[@class="PartialSearchResults-item-title"]//a')
-
+        
         for link in links:
             _class = link.get('class')
             _href = link.get('href')
@@ -141,6 +152,37 @@ class GetSearchInfo:
                 valid_url = validate_url(_href)
                 if valid_url:
                     valid_url = re.sub(r'\?utm_content=.+$', '', valid_url)
+                    result.append(valid_url)
+
+        # Fallback: Extract URLs from embedded JSON (React-rendered results)
+        if not result:
+            # The page embeds results as JSON in the HTML
+            urls = re.findall(r'"url":"(https?://[^"]+)"', html)
+            titles = re.findall(r'"title":"([^"]+)"', html)
+            
+            for url in urls:
+                # Filter out non-result URLs (tracking, assets, etc)
+                if any(x in url.lower() for x in ['getsearchinfo.com/static', 'getsearchinfo.com/web?ad=',
+                                                   'fonts.gstatic', 'fonts.googleapis', 'jquery']):
+                    continue
+                
+                valid_url = validate_url(url)
+                if valid_url:
+                    # Clean up query parameters but keep essentials
+                    valid_url = re.sub(r'\?utm_content=.+$', '', valid_url)
+                    result.append(valid_url)
+
+        # Fallback: try related search links
+        if not result:
+            links = []
+            for a in _parser.root.findall('.//a'):
+                cls = a.get('class', '')
+                if 'related-search' in cls:
+                    links.append(a)
+            for link in links:
+                _href = link.get('href')
+                valid_url = validate_url(_href)
+                if valid_url:
                     result.append(valid_url)
 
         if result:
@@ -160,11 +202,34 @@ class GetSearchInfo:
         if _parser.root is None:
             return next_page
 
+        # Try legacy pattern
         find_next_page = _parser.root.find('.//li[@class="PartialWebPagination-next"]//a')
         if find_next_page is not None:
             _href = find_next_page.get('href')
             if _href:
                 next_page = validate_url(urljoin(self.base_url, _href))
+
+        # Fallback: try React-rendered pagination
+        if not next_page:
+            # Find "Next" link in pagination
+            next_link = _parser.root.find('.//a[@title="Next"]')
+            if not next_link:
+                next_link = _parser.root.find('.//a[@data-testid="pagination-item-next"]')
+            if not next_link:
+                # Find the first pagination item that isn't page 1
+                items = _parser.root.findall('.//a[@data-testid="pagination-item"]')
+                for item in items:
+                    _href = item.get('href')
+                    _class = item.get('class') or ''
+                    title = item.get('title') or ''
+                    if _href and re.search(r'page=2', _href):
+                        next_page = validate_url(urljoin(self.base_url, _href))
+                        break
+            
+            if next_link:
+                _href = next_link.get('href')
+                if _href:
+                    next_page = validate_url(urljoin(self.base_url, _href))
 
         return next_page
 
@@ -175,7 +240,6 @@ if __name__ == '__main__':
     import json
     try:
         parser = argparse.ArgumentParser(usage='%(prog)s [options]')
-        # noinspection PyProtectedMember
         parser._optionals.title = 'Options'
         parser.add_argument('-k', '--keyword',
                             dest='keyword',

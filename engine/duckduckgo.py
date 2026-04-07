@@ -1,17 +1,17 @@
 import re
 from logging import DEBUG
-from urllib.parse import urljoin, urlencode
+from urllib.parse import urljoin, urlencode, urlparse, parse_qs
 from utils.blacklist import is_blacklisted
 from utils.helper import setup_logger, validate_url
 from libs.html_parser import NativeHTMLParser
 from libs.fetch import FetchRequest
 
-logger = setup_logger(name='Seznam')
+logger = setup_logger(name='Duckduckgo')
 
 
-class Seznam:
-    base_url = 'https://www.seznam.cz'
-    search_url = 'https://search.seznam.cz'
+class Duckduckgo:
+    base_url = 'https://html.duckduckgo.com'
+    search_url = 'https://html.duckduckgo.com/html/'
 
     def __init__(self, debug=False):
         self.debug = debug
@@ -24,9 +24,9 @@ class Seznam:
 
     def search(self, keyword):
         self.query.update({'q': str(keyword)})
-        search_url = self.build_query()
+        search_url = self.build_query(keyword=str(keyword))
         if search_url:
-            search_url = urljoin(self.search_url, search_url)
+            search_url = urljoin(self.base_url, search_url)
 
         return self.search_run(search_url)
 
@@ -85,39 +85,14 @@ class Seznam:
             page += 1
 
         result = list(dict.fromkeys(result))
-        logger.info('Total links: %s' % len(result))
+        logger.info('Total links: %d' % len(result))
 
         return result
 
-    def build_query(self, html=None):
+    def build_query(self, keyword, html=None):
         search_url = ''
-        if not html:
-            html = self.fetch.get(self.base_url)
-
-        _parser = NativeHTMLParser()
-        _parser.feed(html)
-        _parser.close()
-
-        if _parser.root is None:
-            return search_url
-
-        form_search = _parser.root.find('.//form[@class="sticky-header-search__form"]')
-
-        if form_search:
-            search_url = form_search.get('action')
-            inputs = form_search.findall('.//input[@type="hidden"]')
-
-            for inp in inputs:
-                _name = inp.get('name')
-                _value = inp.get('value')
-                if not _name:
-                    continue
-
-                if _name != 'q':
-                    self.query.update({_name: _value or ''})
-
-        if search_url:
-            search_url = '%s?%s' % (search_url, urlencode(self.query))
+        self.query.update({'q': str(keyword)})
+        search_url = '%s?%s' % ('/html/', urlencode(self.query))
 
         return search_url
 
@@ -128,37 +103,41 @@ class Seznam:
             return result
 
         _parser = NativeHTMLParser()
-        _parser.feed(html)
+        _parser.feed(str(html))
         _parser.close()
 
         if _parser.root is None:
             return result
 
-        # Try old pattern: data-dot="results" container
-        search_result = _parser.root.find('.//div[@data-dot="results"]')
-        if search_result:
-            links = search_result.findall('.//a[@data-l-id]')
-            for link in links:
-                _href = link.get('href')
+        # DuckDuckGo HTML lite uses a.result__url for display links with href="/l/?uddg=..."
+        # The actual target URL is embedded in the "uddg" query parameter
+        links = _parser.root.findall('.//a[@class="result__url"]')
+
+        for link in links:
+            _href = link.get('href')
+            if _href:
+                # Extract actual URL from /l/?uddg=ENCODED_URL format
+                parsed = urlparse(_href)
+                params = parse_qs(parsed.query)
+                if 'uddg' in params:
+                    _href = params['uddg'][0]
                 valid_url = validate_url(_href)
                 if valid_url:
                     result.append(valid_url)
 
-        # Fallback: Modern Seznam - data-l-id still exists but not inside data-dot="results"
-        # Extract all external links with data-l-id attribute (heading/reference links)
+        # Fallback: also try result__a (title links) which also have /l/?uddg= format
         if not result:
-            import re
-            raw_links = re.findall(
-                r'<a[^>]*data-l-id=[^>]*href="(https?://[^"]+)"[^>]*>',
-                str(html), re.I)
-            for url in raw_links:
-                if 'seznam.cz' not in url.lower() and 's1.cz' not in url.lower():
-                    valid_url = validate_url(url)
-                    if valid_url and not url.startswith('#') and 'utm_content=organic' not in url:
-                        # Remove UTM params from Seznam organic links
-                        import re
-                        clean_url = re.sub(r'#utm_content=organic.*$', '', valid_url)
-                        result.append(clean_url)
+            links = _parser.root.findall('.//a[@class="result__a"]')
+            for link in links:
+                _href = link.get('href')
+                if _href:
+                    parsed = urlparse(_href)
+                    params = parse_qs(parsed.query)
+                    if 'uddg' in params:
+                        _href = params['uddg'][0]
+                    valid_url = validate_url(_href)
+                    if valid_url:
+                        result.append(valid_url)
 
         if result:
             result = list(dict.fromkeys(result))
@@ -171,24 +150,43 @@ class Seznam:
             return next_page
 
         _parser = NativeHTMLParser()
-        _parser.feed(html)
+        _parser.feed(str(html))
         _parser.close()
 
         if _parser.root is None:
             return next_page
 
-        page_items = _parser.root.find('.//ul[@id="paging"]')
-        if not page_items:
-            return next_page
+        # DuckDuckGo HTML pagination: form with next button or link with class 'result-more'
+        more_links = _parser.root.findall('.//a')
+        for _link in more_links:
+            _href = _link.get('href')
+            _text = _link.text
+            _class = _link.get('class', '')
+            if not _href:
+                continue
 
-        list_element = page_items.findall('li')
-        for li in list_element:
-            _class = li.get('class')
-            if _class and re.search(r'Paging-item--next', _class, re.I):
-                _href = li.find('a').get('href')
-                next_page = validate_url(urljoin(self.search_url, _href))
+            # Look for "Next" link
+            if _text and re.search(r'next|more', _text, re.I):
+                if 'uddg' not in _href:  # Not a result link
+                    next_page = validate_url(urljoin(self.base_url, _href))
+                    if next_page:
+                        break
+
+            # Also check for data-suggestion-label or pagination forms
+            if 'next' in _class.lower() or ('next' in _href.lower() and '/l/' not in _href):
+                next_page = validate_url(urljoin(self.base_url, _href))
                 if next_page:
                     break
+
+        # Fallback: check for form with 's' (start) parameter
+        if not next_page:
+            forms = _parser.root.findall('.//form')
+            for form in forms:
+                action = form.get('action', '')
+                if 'next' in action.lower() or ('s=' in action and '/html/' in action):
+                    next_page = validate_url(urljoin(self.base_url, action))
+                    if next_page:
+                        break
 
         return next_page
 
@@ -211,8 +209,8 @@ if __name__ == '__main__':
                             action='store_true')
         parser.add_argument('-o', '--output',
                             dest='output_file',
-                            help='Output results (default seznam_results.txt)',
-                            default='seznam_results.txt',
+                            help='Output results (default duckduckgo_results.txt)',
+                            default='duckduckgo_results.txt',
                             action='store')
 
         args = parser.parse_args()
@@ -220,7 +218,7 @@ if __name__ == '__main__':
             parser.print_help()
             sys.exit('[!] Keyword required')
 
-        eng = Seznam()
+        eng = Duckduckgo()
         res = eng.search(args.keyword)
 
         if args.save_output:

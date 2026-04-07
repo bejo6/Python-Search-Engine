@@ -1,3 +1,4 @@
+import re
 from logging import DEBUG
 from urllib.parse import urljoin, urlencode
 from utils.blacklist import is_blacklisted
@@ -140,17 +141,36 @@ class Naver:
         if _parser.root is None:
             return result
 
+        # Try old pattern: lst_total with link_tit
         search_result = _parser.root.find('.//ul[@class="lst_total"]')
-        if not search_result:
-            return result
+        if search_result:
+            links = search_result.findall('li//a[@class="link_tit"]')
+            for link in links:
+                _href = link.get('href')
+                valid_url = validate_url(_href)
+                if valid_url:
+                    result.append(valid_url)
 
-        links = search_result.findall('li//a[@class="link_tit"]')
+        # Fallback: extract external links with target="_blank" (modern Naver layout)
+        # Uses regex since XPath with target="_blank" and non-naver domains is complex
+        if not result:
+            raw_links = re.findall(
+                r'<a[^>]*target="_blank"[^>]*href="(https?://[^"]+)"', str(html), re.I)
+            for url in raw_links:
+                if 'naver.com' not in url.lower() and 'pstatic' not in url.lower():
+                    valid_url = validate_url(url)
+                    if valid_url:
+                        result.append(valid_url)
 
-        for link in links:
-            _href = link.get('href')
-            valid_url = validate_url(_href)
-            if valid_url:
-                result.append(valid_url)
+            # Extra fallback: find external links in any <a> tag
+            if not result:
+                raw_links = re.findall(
+                    r'<a[^>]*nocr="1"[^>]*href="(https?://[^"]+)"', str(html), re.I)
+                for url in raw_links:
+                    if 'naver.com' not in url.lower() and 'pstatic' not in url.lower():
+                        valid_url = validate_url(url)
+                        if valid_url:
+                            result.append(valid_url)
 
         if result:
             result = list(dict.fromkeys(result))

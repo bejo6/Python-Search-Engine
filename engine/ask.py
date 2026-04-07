@@ -100,8 +100,9 @@ class Ask:
         if not html:
             return result
 
+        # Try result-link pattern first (original Ask layout)
         patern_links = r'(?:<a[^>]+result-link[^>]+>)'
-        patern_href = r'href[\s=]+((?:")(.*?)(?:")|(?:\')(.*?)(?:\'))'
+        patern_href = r'href[\s=]+(?:[\'"])([^\'"]+)'
         patern_utm = r'\?utm_content.+$'
 
         matches = re.findall(patern_links, str(html), re.M | re.I)
@@ -116,6 +117,26 @@ class Ask:
                         result.append(valid_url)
                 except IndexError:
                     pass
+
+        # Fallback: Ask now embeds URLs in JSON as "url":"https://..." patterns
+        if not result:
+            url_pattern = r'"url":"(https?://[^"]+)",?"score"'
+            json_urls = re.findall(url_pattern, str(html), re.I)
+            for url in json_urls:
+                valid_url = validate_url(url)
+                if valid_url:
+                    valid_url = re.sub(patern_utm, '', valid_url)
+                    result.append(valid_url)
+
+        # Second fallback: extract serpIndex URLs
+        if not result:
+            serp_pattern = r'serpIndex[^"]*"url":"(https?://[^"]+)"'
+            serp_urls = re.findall(serp_pattern, str(html), re.I)
+            for url in serp_urls:
+                valid_url = validate_url(url)
+                if valid_url:
+                    valid_url = re.sub(patern_utm, '', valid_url)
+                    result.append(valid_url)
 
         if result:
             result = list(dict.fromkeys(result))

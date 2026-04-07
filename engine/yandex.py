@@ -89,41 +89,9 @@ class Yandex:
         return result
 
     def build_query(self, keyword, html=None):
-        search_url = ''
-        if not html:
-            html = self.fetch.get(self.base_url)
-
-        patern_captcha = r'\/support\/smart-captcha|\/checkcaptcha'
-
-        if re.search(patern_captcha, html, re.I):
-            logger.error('Error captcha')
-            return search_url
-
-        _parser = NativeHTMLParser()
-        _parser.feed(html)
-        _parser.close()
-
-        if _parser.root is None:
-            return search_url
-
-        form_search = _parser.root.find('.//form[@role="search"]')
-
-        if form_search:
-            search_url = form_search.get('action')
-            inputs = form_search.findall('.//input[@type="hidden"]')
-            for inp in inputs:
-                _name = inp.get('name')
-                _value = inp.get('value')
-                if not _name:
-                    continue
-
-                if _name != 'text':
-                    self.query.update({_name: _value or ''})
-
-        if search_url:
-            self.query.update({'text': str(keyword)})
-            search_url = '%s?%s' % (search_url, urlencode(self.query))
-
+        # Yandex search URL can be built directly without parsing homepage
+        self.query.update({'text': str(keyword), 'lr': '114911'})
+        search_url = '/search/?%s' % urlencode(self.query)
         return search_url
 
     @staticmethod
@@ -139,17 +107,29 @@ class Yandex:
         if _parser.root is None:
             return result
 
-        patern_captcha = r'\/support\/smart-captcha|\/checkcaptcha'
+        patern_captcha = r'/(?:support|checkcaptcha)'
 
         if re.search(patern_captcha, html, re.I):
             logger.error('Error captcha')
             return result
 
+        # Try multiple patterns for search results
+        # Pattern 1: ul#search-result with li.serp-item (legacy)
         search_result = _parser.root.find('.//ul[@id="search-result"]')
-        if not search_result:
-            return result
-
-        links = search_result.findall('li[@class="serp-item"]//h2/a')
+        if search_result:
+            links = search_result.findall('li[@class="serp-item"]//h2/a')
+        else:
+            # Pattern 2: Try organic results with class-based
+            search_result = _parser.root.find('.//div[@class="main__content"]')
+            if not search_result:
+                search_result = _parser.root.find('.//div[@id="search-result"]')
+            if search_result:
+                links = search_result.findall('.//a[contains(@class, "organic__url")]')
+            else:
+                # Pattern 3: Fallback - find links with organic URL class
+                links = _parser.root.findall('.//a[contains(@class, "OrganicTitle-Link")]')
+                if not links:
+                    links = _parser.root.findall('.//a[contains(@class, "serp-item")]')
 
         for link in links:
             _class = link.get('class')
@@ -173,7 +153,7 @@ class Yandex:
         if not html:
             return next_page
 
-        patern_captcha = r'\/support\/smart-captcha|\/checkcaptcha'
+        patern_captcha = r'/(?:support|checkcaptcha)'
 
         if re.search(patern_captcha, html, re.I):
             logger.error('Error captcha')
@@ -186,22 +166,26 @@ class Yandex:
         if _parser.root is None:
             return next_page
 
+        # Pattern 1: pager__items with pager__item_kind_next (legacy)
         page_items = _parser.root.find('.//div[@class="pager__items"]')
-        if not page_items:
-            return next_page
+        if page_items:
+            page_links = page_items.findall('a')
+            for link in page_links:
+                _class = link.get('class')
+                _href = link.get('href')
+                if _class and re.search(r'pager__item_kind_next', _class, re.I):
+                    next_page = validate_url(urljoin(self.base_url, _href))
+                    if next_page:
+                        break
 
-        page_links = page_items.findall('a')
-        for link in page_links:
-            _class = link.get('class')
-            _href = link.get('href')
-            if _class and re.search(r'pager__item_kind_next', _class, re.I):
-                next_page = validate_url(urljoin(self.base_url, _href))
-                if next_page:
-                    break
+        # Pattern 2: Try data-arrow attribute on next link
+        if not next_page:
+            next_link = _parser.root.find('.//a[@data-event-required][@data-counter]')
+            if next_link and next_link.get('href'):
+                next_page = validate_url(urljoin(self.base_url, next_link.get('href')))
 
         if not next_page:
-            logger.debug(page_items)
-            logger.debug(page_links)
+            logger.debug('No next page found')
 
         return next_page
 
@@ -212,7 +196,6 @@ if __name__ == '__main__':
     import json
     try:
         parser = argparse.ArgumentParser(usage='%(prog)s [options]')
-        # noinspection PyProtectedMember
         parser._optionals.title = 'Options'
         parser.add_argument('-k', '--keyword',
                             dest='keyword',

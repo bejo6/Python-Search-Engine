@@ -7,14 +7,16 @@ from utils.helper import setup_logger
 from engine.aol import Aol
 from engine.ask import Ask
 from engine.bing import Bing
+from engine.duckduckgo import Duckduckgo
+from engine.ecosia import Ecosia
 from engine.getsearchinfo import GetSearchInfo
-from engine.gigablast import Gigablast
 from engine.google import Google
 from engine.lycos import Lycos
 from engine.metager import MetaGer
 from engine.mojeek import Mojeek
 from engine.naver import Naver
 from engine.seznam import Seznam
+from engine.startpage import Startpage
 from engine.yahoo import Yahoo
 from engine.yandex import Yandex
 
@@ -58,14 +60,16 @@ def engine_start(keyword, output=None, debug_mode=False):
         Aol(debug=debug_mode),
         Ask(debug=debug_mode),
         Bing(debug=debug_mode),
+        Duckduckgo(debug=debug_mode),
+        Ecosia(debug=debug_mode),
         GetSearchInfo(debug=debug_mode),
-        Gigablast(debug=debug_mode),
         Google(debug=debug_mode),
         Lycos(debug=debug_mode),
         MetaGer(debug=debug_mode),
         Mojeek(debug=debug_mode),
         Naver(debug=debug_mode),
         Seznam(debug=debug_mode),
+        Startpage(debug=debug_mode),
         Yahoo(debug=debug_mode),
         Yandex(debug=debug_mode),
     ]

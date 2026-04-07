@@ -147,26 +147,35 @@ class Google:
         if not html:
             return result
 
-        patern_links = r'(?:<a[^>]+data-ved[\s=]+[^>]+>)'
-        patern_href = r'href[\s=]+((?:")(.*?)(?:")|(?:\')(.*?)(?:\'))'
         patern_google_cache = r'(https?://)webcache\.googleusercontent\.[^\/]+/search\?q=cache:[^:]+:' \
                               r'(https?://)?(.+?)(\+?(&cd=[^&]+)(&hl=[^&]+)?(&ct=[^&]+)?(&gl=[^&]+)?.*)'
 
-        matches = re.findall(patern_links, str(html), re.M | re.I)
-        for match in matches:
-            href = re.search(patern_href, match, re.I)
+        # Modern Google: extract URLs from /url?q= links
+        url_q = re.findall(r'href="/url\?q=([^&"]+)', str(html), re.I)
+        for url_part in url_q:
+            try:
+                import urllib.parse
+                valid_url = urllib.parse.unquote(url_part)
+                if valid_url:
+                    cache_link = re.search(patern_google_cache, valid_url, re.I)
+                    if cache_link:
+                        result.append('%s%s' % (cache_link.group(1), cache_link.group(3)))
+                    else:
+                        result.append(valid_url)
+            except Exception:
+                pass
 
-            if href and len(href.groups()) >= 3:
-                try:
-                    valid_url = validate_url(href.group(3) or href.group(2))
-                    if valid_url:
-                        cache_link = re.search(patern_google_cache, valid_url, re.I)
-                        if cache_link:
-                            result.append('%s%s' % (cache_link.group(1), cache_link.group(3)))
-                        else:
-                            result.append(valid_url)
-                except IndexError:
-                    pass
+        # Final fallback: extract any external anchor links from Google pages
+        if not result:
+            raw_links = re.findall(r'href="(https?://(?!www\.google\.|accounts\.google\.|support\.google\.|policies\.google\.|www\.gstatic\.)[^"]+)"', str(html), re.I)
+            for match in raw_links:
+                valid_url = validate_url(match[0])
+                if valid_url:
+                    cache_link = re.search(patern_google_cache, valid_url, re.I)
+                    if cache_link:
+                        result.append('%s%s' % (cache_link.group(1), cache_link.group(3)))
+                    else:
+                        result.append(valid_url)
 
         if result:
             result = list(dict.fromkeys(result))
