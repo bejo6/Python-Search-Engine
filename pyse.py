@@ -17,6 +17,7 @@ from engine.mojeek import Mojeek
 from engine.naver import Naver
 from engine.seznam import Seznam
 from engine.startpage import Startpage
+from engine.searxng import Searxng
 from engine.yahoo import Yahoo
 from engine.yandex import Yandex
 
