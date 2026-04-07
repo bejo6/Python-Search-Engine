@@ -1,0 +1,310 @@
+#!/bin/bash
+# ╔══════════════════════════════════════════════════════════╗
+# ║  SearXNG Private Instance - One-Click Install Script     ║
+# ║  (Non-Docker: systemd + venv + Caddy)                   ║
+# ║                                                           ║
+# ║  Usage: sudo bash install.sh                             ║
+# ╚══════════════════════════════════════════════════════════╝
+
+set -euo pipefail
+
+# ─── CONFIG (EDIT BEFORE RUNNING) ───
+SEARXNG_DOMAIN="search.example.com"       # Ganti dengan domain kamu
+SEARXNG_SECRET=""                         # Kosongkan = auto-generate
+SEARXNG_ADMIN_EMAIL="admin@example.com"   # Untuk Let's Encrypt
+CADDY_API_KEY=""                          # Kosongkan = auto-generate
+
+# ─── COLORS ───
+RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; BLUE='\033[0;34m'; NC='\033[0m'
+info()  { echo -e "${BLUE}[INFO]${NC} $1"; }
+ok()    { echo -e "${GREEN}[ OK ]${NC} $1"; }
+warn()  { echo -e "${YELLOW}[WARN]${NC} $1"; }
+error() { echo -e "${RED}[ERR ]${NC} $1"; }
+fatal() { error "$1"; exit 1; }
+
+# ─── CHECKS ───
+[[ $EUID -ne 0 ]] && fatal "Script harus dijalankan sebagai root (sudo)"
+[[ ! -f /etc/os-release ]] && fatal "Distro tidak terdeteksi"
+source /etc/os-release
+
+info "Installing SearXNG private instance on $ID $VERSION_ID"
+info "Domain: $SEARXNG_DOMAIN"
+
+# ─── AUTO-GENERATE SECRETS ───
+if [[ -z "$SEARXNG_SECRET" ]]; then
+    SEARXNG_SECRET=$(openssl rand -hex 32)
+    ok "Generated secret_key: ${SEARXNG_SECRET:0:8}...${SEARXNG_SECRET: -8}"
+fi
+
+if [[ -z "$CADDY_API_KEY" ]]; then
+    CADDY_API_KEY=$(openssl rand -hex 24)
+    ok "Generated API key: $CADDY_API_KEY"
+fi
+
+# ─── 1. INSTALL DEPENDENCIES ───
+info "Installing system dependencies..."
+case "$ID" in
+    ubuntu|debian)
+        apt-get update -qq
+        apt-get install -y -qq git curl python3 python3-venv python3-pip \
+            ca-certificates gnupg caddy
+        ;;
+    centos|rhel|fedora|rocky|almalinux)
+        if [[ "$ID" == "fedora" || "$ID" == "centos" || "$ID" == "rocky" || "$ID" == "almalinux" ]]; then
+            dnf install -y git curl python3 python3-pip ca-certificates gnupg caddy
+        else
+            yum install -y git curl python3 python3-pip epel-release
+            yum install -y ca-certificates gnupg2 caddy
+        fi
+        ;;
+    arch|manjaro)
+        pacman -Sy --noconfirm git curl python python-pip ca-certificates gnupg caddy
+        ;;
+    *)
+        fatal "Unsupported distribution: $ID"
+        ;;
+esac
+ok "Dependencies installed"
+
+# ─── 2. CREATE SYSTEM USER ───
+if id searxng &>/dev/null; then
+    info "User searxng already exists"
+else
+    info "Creating system user 'searxng'..."
+    useradd --system --user-group --home-dir /opt/searxng --no-create-home searxng
+    mkdir -p /opt/searxng
+    chown searxng:searxng /opt/searxng
+    ok "User 'searxng' created"
+fi
+
+# ─── 3. DOWNLOAD SEARXNG SOURCE ───
+if [[ -d /opt/searxng/searxng-src/.git ]]; then
+    info "SearXNG source already exists, updating..."
+    cd /opt/searxng/searxng-src
+    git pull origin master
+    ok "SearXNG updated"
+else
+    info "Cloning SearXNG repository..."
+    chown searxng:searxng /opt/searxng
+    sudo -u searxng bash -c "
+        cd /opt/searxng
+        git clone https://github.com/searxng/searxng.git searxng-src
+    "
+    ok "SearXNG cloned"
+fi
+
+# ─── 4. SETUP PYTHON VENV ───
+info "Setting up Python virtual environment..."
+sudo -u searxng bash -c "
+    cd /opt/searxng/searxng-src
+    python3 -m venv searx-pyenv
+    source searx-pyenv/bin/activate
+    pip install -q -U pip setuptools wheel
+    pip install -q -e .
+"
+ok "Python venv ready"
+
+# ─── 5. CONFIGURE SEARXNG ───
+info "Configuring SearXNG..."
+SETTINGS="/opt/searxng/settings.yml"
+
+# Copy default settings if needed
+if [[ ! -f "$SETTINGS" ]]; then
+    cp /opt/searxng/searxng-src/searx/settings.yml "$SETTINGS"
+fi
+
+# Apply configuration
+python3 -c "
+import yaml
+import sys
+
+with open('$SETTINGS', 'r') as f:
+    cfg = yaml.safe_load(f)
+
+# Server settings
+cfg.setdefault('server', {})
+cfg['server']['secret_key'] = '$SEARXNG_SECRET'
+cfg['server']['limiter'] = False           # Disable built-in rate limit
+cfg['server']['method'] = 'GET'            # Allow GET for API
+cfg['server']['image_proxy'] = True
+
+# Search settings
+cfg.setdefault('search', {})
+cfg['search']['safe_search'] = 0
+cfg['search']['formats'] = ['html', 'json']
+
+# Enable all key engines
+if 'engines' in cfg:
+    key_engines = ['google', 'bing', 'duckduckgo', 'brave', 'startpage',
+                   'yahoo', 'mojeek', 'ecosia']
+    for eng in cfg['engines']:
+        if eng.get('name') in key_engines:
+            eng['disabled'] = False
+
+with open('$SETTINGS', 'w') as f:
+    yaml.dump(cfg, f, default_flow_style=False, sort_keys=False)
+" 2>/dev/null || {
+    # Fallback if PyYAML not available: use sed
+    # Create our settings.yml directly
+    cat > "$SETTINGS" << 'SETTINGSEOF'
+# Auto-generated by install.sh
+# Secret and settings configured via environment
+use_default_settings: true
+server:
+    limiter: false
+    method: GET
+    image_proxy: true
+    secret_key: PLACEHOLDER
+search:
+    safe_search: 0
+    formats:
+        - html
+        - json
+SETTINGS
+
+    # Replace placeholder
+    sed -i "s/PLACEHOLDER/$SEARXNG_SECRET/" "$SETTINGS"
+}
+
+# Set proper permissions
+chown searxng:searxng "$SETTINGS"
+chmod 640 "$SETTINGS"
+ok "SearXNG configured"
+
+# ─── 6. SETUP SYSTEMD SERVICE ───
+info "Installing systemd service..."
+cat > /etc/systemd/system/searxng.service << SERVICEEOF
+[Unit]
+Description=SearXNG Private Search Instance
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=searxng
+Group=searxng
+WorkingDirectory=/opt/searxng/searxng-src
+ExecStart=/opt/searxng/searxng-src/searx-pyenv/bin/python /opt/searxng/searxng-src/searx/webapp.py
+Restart=on-failure
+RestartSec=5
+Environment=SEARXNG_SETTINGS_PATH=$SETTINGS
+
+# Security hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/searxng
+
+[Install]
+WantedBy=multi-user.target
+SERVICEEOF
+
+systemctl daemon-reload
+systemctl enable --now searxng
+ok "systemd service installed and started"
+
+# ─── 7. WAIT FOR SEARXNG ───
+info "Waiting for SearXNG to start..."
+for i in $(seq 1 30); do
+    if curl -sf http://localhost:8080/ >/dev/null 2>&1; then
+        ok "SearXNG is running"
+        break
+    fi
+    sleep 1
+done
+
+# ─── 8. SETUP CADDY REVERSE PROXY ───
+info "Configuring Caddy reverse proxy..."
+
+# Check if Caddyfile already has custom config (don't overwrite)
+if grep -q "$SEARXNG_DOMAIN" /etc/caddy/Caddyfile 2>/dev/null; then
+    warn "Caddy already configured for $SEARXNG_DOMAIN, skipping"
+else
+    # Backup original
+    cp /etc/caddy/Caddyfile /etc/caddy/Caddyfile.bak 2>/dev/null || true
+
+    # Generate Caddyfile
+    cat > /etc/caddy/Caddyfile << CADDYEOF
+# SearXNG Private Instance - Auto-generated by install.sh
+
+$SEARXNG_DOMAIN {
+    # Auto HTTPS via Let's Encrypt
+    tls $SEARXNG_ADMIN_EMAIL
+
+    # API Key authentication
+    @noapikey {
+        not header X-API-Key $CADDY_API_KEY
+    }
+    respond @noapikey 401
+
+    # Reverse proxy to SearXNG (localhost:8080)
+    reverse_proxy 127.0.0.1:8080 {
+        header_up X-Real-IP {remote_host}
+        header_up X-Forwarded-For {remote_host}
+        header_up X-Forwarded-Proto {scheme}
+    }
+
+    # Security headers
+    header {
+        -Server
+        X-Content-Type-Options "nosniff"
+        X-Frame-Options "DENY"
+        Referrer-Policy "no-referrer"
+        Strict-Transport-Security "max-age=31536000; includeSubDomains"
+    }
+
+    # Compression
+    encode zstd gzip
+
+    # Logging
+    log {
+        output stdout
+        format json
+        level INFO
+    }
+}
+CADDYEOF
+
+    systemctl restart caddy
+    ok "Caddy configured and restarted"
+fi
+
+# ─── 9. FIREWALL ───
+info "Checking firewall..."
+if command -v ufw &>/dev/null; then
+    ufw allow 80/tcp 2>/dev/null || true
+    ufw allow 443/tcp 2>/dev/null || true
+    ok "UFW rules added (ports 80, 443)"
+elif command -v firewall-cmd &>/dev/null; then
+    firewall-cmd --permanent --add-service=http 2>/dev/null || true
+    firewall-cmd --permanent --add-service=https 2>/dev/null || true
+    firewall-cmd --reload 2>/dev/null || true
+    ok "firewalld rules added (http, https)"
+fi
+
+# ─── DONE ───
+echo ""
+echo "╔══════════════════════════════════════════════════════════╗"
+echo "║              SearXNG Installation Complete!              ║"
+echo "╚══════════════════════════════════════════════════════════╝"
+echo ""
+echo "  URL:       https://$SEARXNG_DOMAIN"
+echo "  API Key:   $CADDY_API_KEY"
+echo ""
+echo "  Test (locally):"
+echo "    curl http://localhost:8080/healthz"
+echo ""
+echo "  Test (via domain + API key):"
+echo "    curl -H 'X-API-Key: $CADDY_API_KEY' \\"
+echo "         'https://$SEARXNG_DOMAIN/search?q=test&format=JSON'"
+echo ""
+echo "  Update SearXNG:"
+echo "    cd /opt/searxng/searxng-src"
+echo "    source searx-pyenv/bin/activate"
+echo "    git pull && pip install -U -e ."
+echo "    systemctl restart searxng caddy"
+echo ""
+echo "  Logs:"
+echo "    journalctl -u searxng -f"
+echo "    journalctl -u caddy -f"
+echo ""

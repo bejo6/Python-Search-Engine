@@ -54,7 +54,7 @@ def engine_tasks(engine, keyword, output=None):
         save_links(links)
 
 
-def engine_start(keyword, output=None, debug_mode=False):
+def engine_start(keyword, output=None, debug_mode=False, searxng_host=None, searxng_key=None):
     logger.info('Start search with keyword: %s' % keyword)
 
     engines = [
@@ -70,7 +70,7 @@ def engine_start(keyword, output=None, debug_mode=False):
         Mojeek(debug=debug_mode),
         Naver(debug=debug_mode),
         Seznam(debug=debug_mode),
-        Searxng(debug=debug_mode),
+        Searxng(debug=debug_mode, host=searxng_host or None, api_key=searxng_key or None),
         Startpage(debug=debug_mode),
         Yahoo(debug=debug_mode),
         Yandex(debug=debug_mode),
@@ -111,6 +111,16 @@ def main():
                         dest='debug_mode',
                         help='Set DEBUG mode',
                         action='store_true')
+    parser.add_argument('--searxng-host',
+                        dest='searxng_host',
+                        default='',
+                        help='Private SearXNG host URL (e.g. https://search.example.com)',
+                        action='store')
+    parser.add_argument('--searxng-key',
+                        dest='searxng_key',
+                        default='',
+                        help='API key for private SearXNG host (X-API-Key header)',
+                        action='store')
 
     args = parser.parse_args()
 
@@ -121,14 +131,21 @@ def main():
     if args.debug_mode:
         logger.setLevel(DEBUG)
 
+    searxng_host = args.searxng_host
+    searxng_key = args.searxng_key
+
     if args.keyword:
-        engine_start(keyword=args.keyword, output=args.output_file, debug_mode=args.debug_mode)
+        engine_start(keyword=args.keyword, output=args.output_file,
+                     debug_mode=args.debug_mode,
+                     searxng_host=searxng_host, searxng_key=searxng_key)
     elif args.keyword_list:
         if os.path.exists(args.keyword_list) and os.path.isfile(args.keyword_list):
             with open(args.keyword_list, 'r') as fp:
                 lines = fp.read().splitlines()
                 for line in lines:
-                    engine_start(keyword=line, output=args.output_file, debug_mode=args.debug_mode)
+                    engine_start(keyword=line, output=args.output_file,
+                                 debug_mode=args.debug_mode,
+                                 searxng_host=searxng_host, searxng_key=searxng_key)
 
 
 if __name__ == '__main__':

@@ -1,0 +1,39 @@
+# ╔══════════════════════════════════════════════════════════╗
+# ║  systemd service file for SearXNG                        ║
+# ║                                                          ║
+# ║  Install:                                                ║
+# ║    sudo cp searxng.service /etc/systemd/system/          ║
+# ║    sudo systemctl daemon-reload                          ║
+# ║    sudo systemctl enable --now searxng                   ║
+# ╚══════════════════════════════════════════════════════════╝
+
+[Unit]
+Description=SearXNG Private Search Instance
+Documentation=https://docs.searxng.org/
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=exec
+User=searxng
+Group=searxng
+WorkingDirectory=/opt/searxng/searxng-src
+ExecStart=/opt/searxng/searxng-src/searx-pyenv/bin/python /opt/searxng/searxng-src/searx/webapp.py
+
+# Environment
+EnvironmentFile=-/opt/searxng/.env
+
+# Restart policy
+Restart=on-failure
+RestartSec=10
+
+# Hardening
+PrivateTmp=true
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/searxng
+RestrictSUIDSGID=true
+
+[Install]
+WantedBy=multi-user.target
