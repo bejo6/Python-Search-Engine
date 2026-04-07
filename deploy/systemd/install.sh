@@ -160,7 +160,7 @@ search:
     formats:
         - html
         - json
-SETTINGS
+SETTINGSEOF
 
     # Replace placeholder
     sed -i "s/PLACEHOLDER/$SEARXNG_SECRET/" "$SETTINGS"
