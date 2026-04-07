@@ -70,6 +70,7 @@ def engine_start(keyword, output=None, debug_mode=False):
         Mojeek(debug=debug_mode),
         Naver(debug=debug_mode),
         Seznam(debug=debug_mode),
+        Searxng(debug=debug_mode),
         Startpage(debug=debug_mode),
         Yahoo(debug=debug_mode),
         Yandex(debug=debug_mode),
