@@ -1,5 +1,8 @@
 # Directory
-/venv
+/venv/
+/.venv/
+/docs/
+/deploy/
 /cookie
 **/.idea
 **/__dev
